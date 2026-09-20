@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/auth_repository.dart';
 import '../services/group_repository.dart';
 import '../services/local_session.dart';
 import 'group_detail_screen.dart';
 import 'group_screen.dart';
+import 'profile_screen.dart';
 
 /// Home: lists every group the account has joined. When there are no groups
 /// yet it offers "Create group" / "Join group" buttons; once groups exist the
 /// create action becomes the floating + button in the bottom-right corner.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.repository, required this.local});
+  const HomePage({
+    super.key,
+    required this.auth,
+    required this.user,
+    required this.repository,
+    required this.local,
+  });
 
+  final AuthRepository auth;
+  final AuthUser user;
   final GroupRepository repository;
   final LocalSession local;
 
@@ -65,6 +75,41 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileScreen(
+          user: widget.user,
+          repository: widget.repository,
+          auth: widget.auth,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmLogOut() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('You’ll need your email and password to log back in.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await widget.auth.signOut();
+    }
   }
 
   void _showCreateJoinSheet() {
@@ -225,7 +270,21 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My groups')),
+      appBar: AppBar(
+        title: const Text('My groups'),
+        actions: [
+          IconButton(
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: _openProfile,
+          ),
+          IconButton(
+            tooltip: 'Log out',
+            icon: const Icon(Icons.logout),
+            onPressed: _confirmLogOut,
+          ),
+        ],
+      ),
       floatingActionButton:
           _groups.isEmpty ? null : FloatingActionButton(
         tooltip: 'Create or join',

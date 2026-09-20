@@ -13,7 +13,7 @@ import 'group_repository.dart';
 /// - `groups/{groupId}/expenses/{id}` — Expense map, `date` as Timestamp
 /// - `groups/{groupId}/activity/{id}` — `{by, verb, title, amountPaise, at}`
 /// - `groups/{groupId}/messages/{id}` — `{senderName, text, createdAt}`
-/// - `users/{uid}` — `{displayName, createdAt}`
+/// - `users/{uid}` — `{displayName, email, createdAt}` (owned by AuthRepository)
 /// - `users/{uid}/groups/{groupId}` — `{name, joinedAt}` (memberships)
 class FirestoreGroupRepository implements GroupRepository {
   FirestoreGroupRepository({FirebaseFirestore? firestore})
@@ -129,18 +129,7 @@ class FirestoreGroupRepository implements GroupRepository {
     return GroupInfo(id: ref.id, name: name, members: [member]);
   }
 
-  @override
-  Future<void> setDisplayName(String name) async {
-    await _db.collection('users').doc(_uid).set(
-          {
-            'displayName': name,
-            'createdAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
-  }
-
-  @override
+@override
   Stream<List<GroupInfo>> myGroups() {
     return _memberships().snapshots().asyncMap((snap) async {
       final groups = <GroupInfo>[];
@@ -213,6 +202,48 @@ class FirestoreGroupRepository implements GroupRepository {
       if (!s.exists) return null;
       return _groupFromDoc(s.id, s.data()!);
     });
+  }
+
+  @override
+  Future<int> expenseCount(String groupId) async {
+    final snap = await _expenses(groupId).count().get();
+    return snap.count ?? 0;
+  }
+
+  @override
+  Future<int> expenseCountBetween(
+    String groupId, {
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final snap = await _expenses(groupId)
+        .where('date', isGreaterThanOrEqualTo: from)
+        .where('date', isLessThan: to)
+        .count()
+        .get();
+    return snap.count ?? 0;
+  }
+
+  @override
+  Future<int> totalTrackedPaise(String groupId) async {
+    final snap = await _expenses(groupId)
+        .aggregate(sum('amountPaise'))
+        .get();
+    return snap.getSum('amountPaise')?.toInt() ?? 0;
+  }
+
+  @override
+  Future<Map<String, int>> perMemberPaid(String groupId) async {
+    final snap = await _expenses(groupId).get();
+    final totals = <String, int>{};
+    for (final d in snap.docs) {
+      final data = d.data();
+      final paidBy = data['paidBy'] as String?;
+      if (paidBy == null || paidBy.isEmpty) continue;
+      totals[paidBy] =
+          (totals[paidBy] ?? 0) + ((data['amountPaise'] as num?)?.toInt() ?? 0);
+    }
+    return totals;
   }
 
   @override

@@ -530,10 +530,77 @@ void main() {
       final expenses = await repo.watchExpenses(g.id).first;
       expect(expenses.single.sharesPaise, {'Aarav': 5000});
     });
+  });
 
-    test('setDisplayName is recorded', () async {
-      await repo.setDisplayName('Aarav');
-      expect(repo.displayName, 'Aarav');
+  group('aggregate queries', () {
+    late InMemoryGroupRepository repo;
+    String gid = '';
+
+    setUp(() async {
+      repo = InMemoryGroupRepository();
+      final g = await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      gid = g.id;
+      await repo.setMembers(gid, ['Aarav', 'Meera']);
+      await repo.addExpense(
+        gid,
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 10),
+          addedBy: 'Aarav',
+        ),
+      );
+      await repo.addExpense(
+        gid,
+        Expense.equalSplit(
+          id: 'e2',
+          title: 'Dinner',
+          amountPaise: 5000,
+          paidBy: 'Meera',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Meera',
+        ),
+      );
+    });
+
+    test('expenseCount and totalTrackedPaise sum the collection', () async {
+      expect(await repo.expenseCount(gid), 2);
+      expect(await repo.totalTrackedPaise(gid), 15000);
+    });
+
+    test('expenseCountBetween filters by date range', () async {
+      expect(
+        await repo.expenseCountBetween(
+          gid,
+          from: DateTime(2026, 9, 1),
+          to: DateTime(2026, 9, 11),
+        ),
+        1,
+      );
+      expect(
+        await repo.expenseCountBetween(
+          gid,
+          from: DateTime(2026, 9, 1),
+          to: DateTime(2026, 9, 21),
+        ),
+        2,
+      );
+      expect(
+        await repo.expenseCountBetween(
+          gid,
+          from: DateTime(2026, 10, 1),
+          to: DateTime(2026, 10, 31),
+        ),
+        0,
+      );
+    });
+
+    test('perMemberPaid groups by paidBy', () async {
+      expect(await repo.perMemberPaid(gid), {'Aarav': 10000, 'Meera': 5000});
     });
   });
 }

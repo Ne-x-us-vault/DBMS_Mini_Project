@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'firebase_options.dart';
 import 'screens/home_page.dart';
 import 'screens/login_screen.dart';
+import 'services/auth_repository.dart';
+import 'services/firebase_auth_repository.dart';
 import 'services/firestore_repository.dart';
 import 'services/group_repository.dart';
 import 'services/local_session.dart';
@@ -30,10 +31,9 @@ class SplitChatApp extends StatelessWidget {
   }
 }
 
-/// Initializes Firebase + anonymous auth *inside* the widget tree so the
-/// app always renders something (a "Connecting…" screen, then the real
-/// error with a Retry button if the cloud is unreachable) instead of a
-/// white screen.
+/// Initializes Firebase *inside* the widget tree so the app always renders
+/// something (a "Connecting…" screen, then the real error with a Retry button
+/// if the cloud is unreachable) instead of a white screen.
 class FirebaseBootstrap extends StatefulWidget {
   const FirebaseBootstrap({super.key});
 
@@ -54,7 +54,6 @@ class _FirebaseBootstrapState extends State<FirebaseBootstrap> {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    await FirebaseAuth.instance.signInAnonymously();
   }
 
   void _retry() {
@@ -74,6 +73,7 @@ class _FirebaseBootstrapState extends State<FirebaseBootstrap> {
           return _FirebaseErrorScreen(error: snap.error!, onRetry: _retry);
         }
         return AppBootstrap(
+          auth: FirebaseAuthRepository(),
           repository: FirestoreGroupRepository(),
           local: LocalSession(),
         );
@@ -126,8 +126,8 @@ class _FirebaseErrorScreen extends StatelessWidget {
     final code = _errorCode(error);
     final msg = _errorMessage(error);
     if (code == 'operation-not-allowed' || code == 'admin-restricted-operation') {
-      return 'Anonymous sign-in is not enabled. Enable it in the Firebase '
-          'console: Authentication → Sign-in method → Anonymous.';
+      return 'Email/Password sign-in is not enabled. Enable it in the Firebase '
+          'console: Authentication → Sign-in method → Email/Password.';
     }
     if (code == 'permission-denied') {
       return 'Security rules are blocking access. Deploy the Firestore rules '
@@ -205,15 +205,18 @@ class _FirebaseErrorScreen extends StatelessWidget {
   }
 }
 
-/// Decides between the login (name entry) screen and the home group list,
-/// based on whether this device already knows its display name.
+/// Decides between the login screen and the home group list, based on the
+/// signed-in account. Sign-up/log-in/sign-out all flow through
+/// [AuthRepository.authState] so the UI follows the auth session automatically.
 class AppBootstrap extends StatefulWidget {
   const AppBootstrap({
     super.key,
+    required this.auth,
     required this.repository,
     required this.local,
   });
 
+  final AuthRepository auth;
   final GroupRepository repository;
   final LocalSession local;
 
@@ -222,33 +225,45 @@ class AppBootstrap extends StatefulWidget {
 }
 
 class _AppBootstrapState extends State<AppBootstrap> {
-  bool _loading = true;
+  AuthUser? _user;
+  bool _localReady = false;
 
   @override
   void initState() {
     super.initState();
     widget.local.load().then((_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() => _localReady = true);
+    });
+    widget.auth.authState().listen((user) {
+      if (!mounted) return;
+      if (user == null) {
+        // Signed out: forget on-device identity + the open group.
+        widget.local.setDisplayName(null);
+        widget.local.setGroupId(null);
+      } else {
+        // Signed in: mirror the cloud profile name for group creation.
+        widget.local.setDisplayName(user.displayName);
+      }
+      setState(() => _user = user);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    if (!_localReady) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    if (widget.local.displayName.isEmpty) {
-      return LoginScreen(
-        repository: widget.repository,
-        local: widget.local,
-        onDone: () {
-          setState(() {});
-        },
-      );
+    if (_user == null) {
+      return LoginScreen(auth: widget.auth);
     }
-    return HomePage(repository: widget.repository, local: widget.local);
+    return HomePage(
+      auth: widget.auth,
+      user: _user!,
+      repository: widget.repository,
+      local: widget.local,
+    );
   }
 }

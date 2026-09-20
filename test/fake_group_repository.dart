@@ -15,7 +15,6 @@ class InMemoryGroupRepository implements GroupRepository {
   final List<Activity> _activity = [];
   final List<ChatMessage> _messages = [];
   final Set<String> _joined = {};
-  String? displayName;
 
   final _groupCtrl = StreamController<GroupInfo?>.broadcast();
   final _expCtrl = StreamController<List<Expense>>.broadcast();
@@ -60,11 +59,6 @@ class InMemoryGroupRepository implements GroupRepository {
   }
 
   @override
-  Future<void> setDisplayName(String name) async {
-    displayName = name;
-  }
-
-  @override
   Stream<List<GroupInfo>> myGroups() {
     Future(() => _emitMembers());
     return _membersCtrl.stream;
@@ -74,6 +68,34 @@ class InMemoryGroupRepository implements GroupRepository {
   Future<GroupInfo?> fetchGroup(String groupId) async {
     if (_group != null && _group!.id == groupId) return _group;
     return null;
+  }
+
+  @override
+  Future<int> expenseCount(String groupId) async => _expenses.length;
+
+  @override
+  Future<int> expenseCountBetween(
+    String groupId, {
+    required DateTime from,
+    required DateTime to,
+  }) async =>
+      _expenses
+          .where((e) => !e.date.isBefore(from) && e.date.isBefore(to))
+          .length;
+
+  @override
+  Future<int> totalTrackedPaise(String groupId) async =>
+      _expenses.fold<int>(0, (sum, e) => sum + e.amountPaise);
+
+  @override
+  Future<Map<String, int>> perMemberPaid(String groupId) async {
+    final totals = <String, int>{};
+    for (final e in _expenses) {
+      final pb = e.paidBy;
+      if (pb == null || pb.isEmpty) continue;
+      totals[pb] = (totals[pb] ?? 0) + e.amountPaise;
+    }
+    return totals;
   }
 
   @override

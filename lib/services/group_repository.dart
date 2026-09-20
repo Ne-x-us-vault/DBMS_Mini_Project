@@ -29,11 +29,29 @@ abstract class GroupRepository {
   /// one atomic batched write.
   Future<void> leaveGroup(String groupId, {required String name});
 
-  /// Records the signed-in account's display (identity) name.
-  Future<void> setDisplayName(String name);
-
   /// Reads a group by code. Returns `null` if it does not exist.
   Future<GroupInfo?> fetchGroup(String groupId);
+
+  /// Reports (aggregate) queries — the production implementation runs these
+  /// as server-side Firestore `count`/`sum` aggregate queries, which is what
+  /// the DBMS demo points at.
+
+  /// Number of expenses in the group (server-side `COUNT(*)`).
+  Future<int> expenseCount(String groupId);
+
+  /// Number of expenses whose `date` is in `[from, to)` (range query +
+  /// `COUNT(*)`).
+  Future<int> expenseCountBetween(
+    String groupId, {
+    required DateTime from,
+    required DateTime to,
+  });
+
+  /// Sum of all `amountPaise` in the group (server-side `SUM(amountPaise)`).
+  Future<int> totalTrackedPaise(String groupId);
+
+  /// Total amount paid per member (`GROUP BY paidBy, SUM(amountPaise)`).
+  Future<Map<String, int>> perMemberPaid(String groupId);
 
   /// Real-time snapshots of the group document. `null` when deleted.
   Stream<GroupInfo?> watchGroup(String groupId);
