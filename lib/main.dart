@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'firebase_options.dart';
 import 'screens/chat_screen.dart';
@@ -32,8 +33,9 @@ class SplitChatApp extends StatelessWidget {
 }
 
 /// Initializes Firebase + anonymous auth *inside* the widget tree so the
-/// app always renders something (spinner, then an error+retry screen if
-/// the cloud is unreachable) instead of a white screen.
+/// app always renders something (a "Connecting…" screen, then the real
+/// error with a Retry button if the cloud is unreachable) instead of a
+/// white screen.
 class FirebaseBootstrap extends StatefulWidget {
   const FirebaseBootstrap({super.key});
 
@@ -67,13 +69,11 @@ class _FirebaseBootstrapState extends State<FirebaseBootstrap> {
       future: _init,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const _ConnectingScreen();
         }
         if (snap.hasError) {
           debugPrint('Firebase bootstrap failed: ${snap.error}');
-          return _FirebaseErrorScreen(onRetry: _retry);
+          return _FirebaseErrorScreen(error: snap.error!, onRetry: _retry);
         }
         return AppBootstrap(
           repository: FirestoreGroupRepository(),
@@ -84,38 +84,122 @@ class _FirebaseBootstrapState extends State<FirebaseBootstrap> {
   }
 }
 
-class _FirebaseErrorScreen extends StatelessWidget {
-  const _FirebaseErrorScreen({required this.onRetry});
-
-  final VoidCallback onRetry;
+class _ConnectingScreen extends StatelessWidget {
+  const _ConnectingScreen();
 
   @override
   Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Connecting…'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows the real exception (type, error code, message) with a plain-English
+/// hint for common cases and a Retry button.
+class _FirebaseErrorScreen extends StatelessWidget {
+  const _FirebaseErrorScreen({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  String _errorCode(Object e) {
+    if (e is FirebaseException) return e.code;
+    if (e is PlatformException) return e.code;
+    return '';
+  }
+
+  String _errorMessage(Object e) {
+    if (e is FirebaseException) return e.message ?? e.toString();
+    if (e is PlatformException) return e.message ?? e.toString();
+    return e.toString();
+  }
+
+  String get _hint {
+    final code = _errorCode(error);
+    final msg = _errorMessage(error);
+    if (code == 'operation-not-allowed' || code == 'admin-restricted-operation') {
+      return 'Anonymous sign-in is not enabled. Enable it in the Firebase '
+          'console: Authentication → Sign-in method → Anonymous.';
+    }
+    if (code == 'permission-denied') {
+      return 'Security rules are blocking access. Deploy the Firestore rules '
+          '(firebase deploy --only firestore:rules).';
+    }
+    if (code == 'not-found' ||
+        msg.contains('database does not exist') ||
+        msg.contains('The Cloud Firestore database is not available')) {
+      return 'The Firestore database does not exist. Create it in the Firebase '
+          'console: Firestore Database → Create database.';
+    }
+    if (code == 'unavailable' || code == 'network-request-failed') {
+      return 'No internet connection on this device. Check Wi-Fi/data and try again.';
+    }
+    if (msg.contains('invalid api key') || msg.contains('app not found')) {
+      return 'The Firebase config does not match this app. Rerun '
+          'flutterfire configure --project=<your project id>.';
+    }
+    return 'See the error details below. Try again once you are online.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 56),
-              const SizedBox(height: 12),
-              const Text(
-                'Could not connect to Firebase',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Check your internet connection and that Firebase is set up, then try again.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try again'),
-              ),
-            ],
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(Icons.cloud_off_outlined,
+                    size: 56, color: theme.colorScheme.error),
+                const SizedBox(height: 12),
+                Text(
+                  'Could not connect to Firebase',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _hint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SelectableText(
+                      'Type:      ${error.runtimeType}\n'
+                      'Code:      ${_errorCode(error)}\n'
+                      'Message:   ${_errorMessage(error)}',
+                      style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try again'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
