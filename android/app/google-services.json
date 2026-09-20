@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "118089036144",
+    "project_id": "split-chat-007",
+    "storage_bucket": "split-chat-007.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:118089036144:android:c3b59a670316a68ad31fb5",
+        "android_client_info": {
+          "package_name": "com.example.split_chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCu0mHFy9q6slPuv8sVoV8hG91XV4SXYi8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
