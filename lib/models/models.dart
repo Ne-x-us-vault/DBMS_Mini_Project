@@ -1,23 +1,20 @@
-class UserProfile {
-  const UserProfile({
-    required this.uid,
-    required this.email,
+/// A shared expense group. `id` is the Firestore document id (the "group code").
+class GroupInfo {
+  const GroupInfo({
+    required this.id,
     required this.name,
-    required this.role,
+    required this.members,
   });
 
-  final String uid;
-  final String email;
+  final String id;
   final String name;
-  final String role;
-
-  bool get isAdmin => role == 'admin';
+  final List<String> members;
 }
 
+/// One entry in the group-wide activity log.
 class Activity {
   const Activity({
     required this.by,
-    required this.byUid,
     required this.verb,
     required this.title,
     this.amountPaise,
@@ -25,25 +22,23 @@ class Activity {
   });
 
   final String by;
-  final String byUid;
   final String verb;
   final String title;
   final int? amountPaise;
   final DateTime at;
 }
 
+/// One chat message. `senderName` is the "Managing as" name of the sender.
 class ChatMessage {
   const ChatMessage({
     required this.id,
+    required this.senderName,
     required this.text,
-    required this.by,
-    required this.byUid,
-    required this.at,
+    required this.createdAt,
   });
 
   final String id;
+  final String senderName;
   final String text;
-  final String by;
-  final String byUid;
-  final DateTime at;
+  final DateTime createdAt;
 }

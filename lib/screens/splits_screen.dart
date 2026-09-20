@@ -1,30 +1,30 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import '../logic/split_logic.dart';
 import '../models/expense.dart';
 import '../store/app_store.dart';
 import '../utils/money.dart';
-import 'admin_panel_screen.dart';
 
 class SplitsScreen extends StatelessWidget {
-  const SplitsScreen({super.key, required this.store});
+  const SplitsScreen({super.key, required this.store, required this.onLeave});
 
   final AppStore store;
+  final VoidCallback onLeave;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: store,
-      builder: (context, _) => _SplitsView(store: store),
+      builder: (context, _) => _SplitsView(store: store, onLeave: onLeave),
     );
   }
 }
 
 class _SplitsView extends StatelessWidget {
-  const _SplitsView({required this.store});
+  const _SplitsView({required this.store, required this.onLeave});
 
   final AppStore store;
+  final VoidCallback onLeave;
 
   String _shortDate(DateTime d) {
     const months = [
@@ -38,7 +38,7 @@ class _SplitsView extends StatelessWidget {
 
   Future<void> _addExpense(BuildContext context) async {
     if (store.members.isEmpty) {
-      _toast(context, 'No users yet. Someone must sign up first.');
+      _toast(context, 'No members yet. Add a person first.');
       return;
     }
     final e = await showExpenseDialog(context, store: store);
@@ -46,13 +46,11 @@ class _SplitsView extends StatelessWidget {
   }
 
   Future<void> _editExpense(BuildContext context, Expense e) async {
-    if (!store.canEdit(e)) return;
     final edited = await showExpenseDialog(context, store: store, existing: e);
     if (edited != null) store.replaceExpense(edited);
   }
 
   Future<void> _confirmDelete(BuildContext context, Expense e) async {
-    if (!store.canDelete(e)) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -71,7 +69,37 @@ class _SplitsView extends StatelessWidget {
         ],
       ),
     );
-    if (ok == true) store.removeExpense(e.id);
+    if (ok == true) store.removeExpense(e);
+  }
+
+  Future<void> _removeMember(BuildContext context, String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove member?'),
+        content: Text(
+          '$name will be removed from the group and stripped from the shares '
+          'of every expense. Their recorded expenses stay.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      store.removeMember(name);
+      if (store.managingAs == name) {
+        store.setManagingAs('');
+      }
+    }
   }
 
   Future<void> _clearHistory(BuildContext context) async {
@@ -98,6 +126,28 @@ class _SplitsView extends StatelessWidget {
     if (ok == true) store.clearActivity();
   }
 
+  Future<void> _pickManagingAs(BuildContext context) async {
+    final name = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => _ManagingSheet(
+        members: store.members,
+        current: store.managingAs,
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    final n = name.trim();
+    if (!store.members.contains(n)) {
+      await store.addMember(n);
+    }
+    store.setManagingAs(n);
+  }
+
+  void _copyCode(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: store.groupId));
+    _toast(context, 'Group code copied');
+  }
+
   void _openDetail(BuildContext context, Expense e) {
     showModalBottomSheet(
       context: context,
@@ -113,7 +163,6 @@ class _SplitsView extends StatelessWidget {
           ),
           child: _ExpenseDetailSheet(
             expense: e,
-            canEdit: store.canEdit(e),
             dateOf: _dateLine,
             onEdit: () => _editExpense(context, e),
             onDelete: () {
@@ -135,46 +184,52 @@ class _SplitsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final users = store.users;
+    final members = store.members;
     final expenses = store.expenses;
-    final balances = computeBalances(store.members, expenses);
-    final settlements = computeSettlements(store.members, expenses);
+    final balances = store.balances();
+    final settlements = store.settle();
     final totalPaise = expenses.fold(0, (sum, e) => sum + e.amountPaise);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shared expenses'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Shared expenses'),
+            if (store.groupName.isNotEmpty)
+              Text(
+                store.groupName,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+          ],
+        ),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Account',
+          IconButton(
+            tooltip: 'Managing as',
             icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () => _pickManagingAs(context),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Options',
             onSelected: (v) {
-              switch (v) {
-                case 'admin':
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AdminPanelScreen(store: store),
-                    ),
-                  );
-                case 'signout':
-                  FirebaseAuth.instance.signOut();
-              }
+              if (v == 'leave') onLeave();
             },
             itemBuilder: (ctx) => [
               PopupMenuItem(
                 enabled: false,
                 child: Text(
-                  '${store.myName} · ${store.isAdmin ? 'Admin' : 'Member'}',
+                  'Managing as: ${store.managingAs.isEmpty ? '—' : store.managingAs}',
                   style: theme.textTheme.labelMedium
                       ?.copyWith(color: theme.colorScheme.outline),
                 ),
               ),
               const PopupMenuItem(
-                value: 'admin',
-                child: Text('Manage users & roles'),
+                value: 'leave',
+                child: Text('Leave group'),
               ),
-              const PopupMenuItem(value: 'signout', child: Text('Sign out')),
             ],
           ),
         ],
@@ -182,6 +237,25 @@ class _SplitsView extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.link),
+              title: Text('Group code: ${store.groupId}'),
+              subtitle: Text(
+                'Share this code with friends so they can join.',
+                style: TextStyle(
+                    color: theme.colorScheme.outline, fontSize: 12),
+              ),
+              trailing: IconButton(
+                tooltip: 'Copy',
+                icon: const Icon(Icons.copy_outlined),
+                onPressed: () => _copyCode(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           _SectionHeader(
             title: 'Expenses (${expenses.length})',
             icon: Icons.add_circle_outline,
@@ -224,20 +298,17 @@ class _SplitsView extends StatelessWidget {
                           fontSize: 16,
                         ),
                       ),
-                      if (store.canEdit(e))
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, size: 20),
-                          onSelected: (v) => v == 'delete'
-                              ? _confirmDelete(context, e)
-                              : _editExpense(context, e),
-                          itemBuilder: (ctx) => const [
-                            PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(
-                                value: 'delete', child: Text('Delete')),
-                          ],
-                        )
-                      else
-                        const SizedBox(width: 48),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 20),
+                        onSelected: (v) => v == 'delete'
+                            ? _confirmDelete(context, e)
+                            : _editExpense(context, e),
+                        itemBuilder: (ctx) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem(
+                              value: 'delete', child: Text('Delete')),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -259,7 +330,7 @@ class _SplitsView extends StatelessWidget {
                     TextStyle(color: theme.colorScheme.outline, fontSize: 12),
               ),
               children: [
-                if (store.activity.isNotEmpty && store.isAdmin)
+                if (store.activity.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Align(
@@ -309,29 +380,24 @@ class _SplitsView extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _SectionHeader(
-            title: 'People (${users.length})',
-            icon: null,
-            tooltip: null,
-            onTap: null,
+            title: 'People (${members.length})',
+            icon: Icons.person_add_alt_1,
+            tooltip: 'Add member',
+            onTap: () => _addMember(context),
           ),
           const SizedBox(height: 8),
-          if (users.isEmpty)
-            _EmptyCard(text: 'No users yet. Share the app to sign up.')
+          if (members.isEmpty)
+            _EmptyCard(text: 'No members yet. Add one or share the group code.')
           else
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final u in users)
+                for (final m in members)
                   Chip(
-                    avatar: CircleAvatar(child: Text(u.name[0].toUpperCase())),
-                    label: Text(
-                      u.isAdmin ? '${u.name} (admin)' : u.name,
-                    ),
-                    onDeleted:
-                        store.isAdmin && u.uid != store.myUid
-                            ? () => _removeUser(context, u)
-                            : null,
+                    avatar: CircleAvatar(child: Text(m[0].toUpperCase())),
+                    label: Text(store.managingAs == m ? '$m (you)' : m),
+                    onDeleted: () => _removeMember(context, m),
                   ),
               ],
             ),
@@ -343,13 +409,13 @@ class _SplitsView extends StatelessWidget {
             onTap: null,
           ),
           const SizedBox(height: 8),
-          if (users.isEmpty)
+          if (members.isEmpty)
             _EmptyCard(text: 'Add people to see balances.')
           else
             Card(
               child: Column(
                 children: [
-                  for (final m in store.members)
+                  for (final m in members)
                     ListTile(
                       dense: true,
                       title: Text(m),
@@ -399,42 +465,130 @@ class _SplitsView extends StatelessWidget {
     );
   }
 
-  Future<void> _removeUser(BuildContext context, dynamic u) async {
-    final ok = await showDialog<bool>(
+  Future<void> _addMember(BuildContext context) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Remove user?'),
-        content: Text(
-          '${u.name} will no longer be a group member. Their expenses stay in the history.',
+        title: const Text('Add member'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Name'),
+          autofocus: true,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove'),
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Add'),
           ),
         ],
       ),
     );
-    if (ok == true) store.removeUser(u.uid);
+    if (name == null || name.isEmpty) return;
+    await store.addMember(name);
+  }
+}
+
+class _ManagingSheet extends StatefulWidget {
+  const _ManagingSheet({required this.members, required this.current});
+
+  final List<String> members;
+  final String current;
+
+  @override
+  State<_ManagingSheet> createState() => _ManagingSheetState();
+}
+
+class _ManagingSheetState extends State<_ManagingSheet> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _pick(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    Navigator.pop(context, n);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Managing as',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final m in widget.members)
+            ListTile(
+              leading: CircleAvatar(child: Text(m[0].toUpperCase())),
+              title: Text(m),
+              selected: widget.current == m,
+              trailing: widget.current == m
+                  ? Icon(Icons.check, color: theme.colorScheme.primary)
+                  : null,
+              onTap: () => _pick(m),
+            ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.only(left: 24, top: 8),
+            child: Text('Add my own name',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: const InputDecoration(
+                        labelText: 'Your name', isDense: true),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: _pick,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: _controller.text.trim().isEmpty
+                      ? null
+                      : () => _pick(_controller.text),
+                  icon: const Icon(Icons.add),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
 class _ExpenseDetailSheet extends StatelessWidget {
   const _ExpenseDetailSheet({
     required this.expense,
-    required this.canEdit,
     required this.dateOf,
     required this.onEdit,
     required this.onDelete,
   });
 
   final Expense expense;
-  final bool canEdit;
   final String Function(DateTime) dateOf;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -497,29 +651,27 @@ class _ExpenseDetailSheet extends StatelessWidget {
               fontSize: 12,
             ),
           ),
-        if (canEdit) ...[
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit'),
-                ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit'),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Delete'),
-                ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete'),
               ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
         const Divider(height: 24),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -707,7 +859,8 @@ Future<Expense?> showExpenseDialog(
         final amountPaise = toPaise(double.tryParse(amountController.text) ?? 0);
         final net = members.fold(
           0,
-          (sum, m) => sum + toPaise(double.tryParse(shareControllers[m]!.text) ?? 0),
+          (sum, m) => sum +
+              toPaise(double.tryParse(shareControllers[m]!.text) ?? 0),
         );
         final manualOK = !split || mode == 0 || net == amountPaise;
         final valid = amountPaise > 0 &&
@@ -744,13 +897,15 @@ Future<Expense?> showExpenseDialog(
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.event),
-                    title: Text('Date: ${date.day}/${date.month}/${date.year}'),
+                    title: Text(
+                        'Date: ${date.day}/${date.month}/${date.year}'),
                     onTap: () async {
                       final picked = await showDatePicker(
                         context: ctx,
                         initialDate: date,
                         firstDate: DateTime(2020),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                        lastDate:
+                            DateTime.now().add(const Duration(days: 365)),
                       );
                       if (picked != null) setLocal(() => date = picked);
                     },
@@ -758,14 +913,16 @@ Future<Expense?> showExpenseDialog(
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Split this expense'),
-                    subtitle: const Text('Share the cost among people'),
+                    subtitle:
+                        const Text('Share the cost among people'),
                     value: split,
                     onChanged: (v) => setLocal(() => split = v),
                   ),
                   if (split) ...[
                     DropdownButtonFormField<String>(
                       initialValue: paidBy,
-                      decoration: const InputDecoration(labelText: 'Paid by'),
+                      decoration:
+                          const InputDecoration(labelText: 'Paid by'),
                       items: [
                         for (final m in members)
                           DropdownMenuItem(value: m, child: Text(m)),
@@ -786,7 +943,8 @@ Future<Expense?> showExpenseDialog(
                           if (newMode == 1) {
                             for (final m in members) {
                               final v = toPaise(
-                                    double.tryParse(amountController.text) ?? 0,
+                                    double.tryParse(amountController.text) ??
+                                        0,
                                   ) ~/
                                   members.length;
                               shareControllers[m]!.text = paiseToInput(v);
@@ -848,7 +1006,7 @@ Future<Expense?> showExpenseDialog(
                       final id = existing?.id ??
                           DateTime.now().microsecondsSinceEpoch.toString();
                       final baseTitle = titleController.text.trim();
-                      final addedBy = existing?.addedBy ?? store.myName;
+                      final addedBy = existing?.addedBy ?? store.managingAs;
                       Expense exp;
                       if (!split) {
                         exp = Expense(
@@ -879,7 +1037,8 @@ Future<Expense?> showExpenseDialog(
                           sharesPaise: {
                             for (final m in members)
                               m: toPaise(
-                                double.tryParse(shareControllers[m]!.text) ?? 0,
+                                double.tryParse(shareControllers[m]!.text) ??
+                                    0,
                               ),
                           },
                           date: date,

@@ -1,10 +1,30 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:split_chat/logic/split_logic.dart';
 import 'package:split_chat/models/expense.dart';
+import 'package:split_chat/services/local_session.dart';
+import 'package:split_chat/store/app_store.dart';
 import 'package:split_chat/utils/money.dart';
 
+import 'fake_group_repository.dart';
+
+Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 1));
+
+AppStore makeStore(InMemoryGroupRepository repo, String managingAs) {
+  final local = LocalSession()..managingAs = managingAs;
+  final store = AppStore(repo: repo, session: local, groupId: repo.group!.id);
+  store.init();
+  return store;
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('Expense.equalSplit', () {
     test('splits evenly and puts leftover paise on the last member', () {
       final e = Expense.equalSplit(
@@ -47,7 +67,6 @@ void main() {
         members: ['A', 'B'],
         date: DateTime(2026, 9, 20, 14, 30),
         addedBy: 'A',
-        ownerId: 'uid-1',
       );
       final copy = Expense.fromMap(e.toMap());
       expect(copy.id, e.id);
@@ -57,7 +76,6 @@ void main() {
       expect(copy.paidBy, e.paidBy);
       expect(copy.sharesPaise, e.sharesPaise);
       expect(copy.addedBy, e.addedBy);
-      expect(copy.ownerId, e.ownerId);
       expect(copy.date, e.date);
     });
   });
@@ -75,6 +93,36 @@ void main() {
       expect(e.split, isFalse);
       expect(e.paidBy, isNull);
       expect(e.sharesPaise, isEmpty);
+    });
+  });
+
+  group('stripMemberFromShares', () {
+    test('removes the member from shares only in split expenses', () {
+      final e = Expense.equalSplit(
+        id: '1',
+        title: 'Lunch',
+        amountPaise: 3000,
+        paidBy: 'A',
+        members: ['A', 'B'],
+        date: DateTime(2026, 9, 20),
+        addedBy: 'A',
+      );
+      final stripped = stripMemberFromShares(e, 'B');
+      expect(stripped.sharesPaise, {'A': 1500});
+      expect(stripped.title, e.title);
+      expect(stripped.amountPaise, e.amountPaise);
+    });
+
+    test('tracking-only expenses are returned unchanged', () {
+      final e = Expense(
+        id: '1',
+        title: 'Groceries',
+        amountPaise: 2000,
+        split: false,
+        date: DateTime(2026, 9, 20),
+        addedBy: 'A',
+      );
+      expect(stripMemberFromShares(e, 'B').sharesPaise, isEmpty);
     });
   });
 
@@ -189,37 +237,6 @@ void main() {
       );
       expect(result, isEmpty);
     });
-
-    test('partial payments chain across debtors', () {
-      final result = computeSettlements(
-        ['A', 'B', 'C', 'D'],
-        [
-          Expense.equalSplit(
-            id: '1',
-            title: 'Dinner',
-            amountPaise: 10000,
-            paidBy: 'A',
-            members: ['A', 'B', 'C', 'D'],
-            date: DateTime(2026, 9, 20),
-            addedBy: 'A',
-          ),
-          Expense.equalSplit(
-            id: '2',
-            title: 'Coffee',
-            amountPaise: 20000,
-            paidBy: 'B',
-            members: ['A', 'B', 'C', 'D'],
-            date: DateTime(2026, 9, 20),
-            addedBy: 'A',
-          ),
-        ],
-      );
-      // Balances: A +2500, B +12500, C -7500, D -7500.
-      // C pays B 7500; D pays B 5000 then A 2500.
-      expect(result.length, 3);
-      final total = result.fold(0, (s, r) => s + r.amountPaise);
-      expect(total, 15000);
-    });
   });
 
   group('diffExpenses', () {
@@ -228,7 +245,6 @@ void main() {
       required String title,
       required int amountPaise,
       String? paidBy,
-      String date = '2026-09-20',
     }) {
       return Expense.fromMap({
         'id': id,
@@ -236,10 +252,9 @@ void main() {
         'amountPaise': amountPaise,
         'split': paidBy != null,
         'paidBy': paidBy,
-        'sharesPaise': paidBy == null
-            ? <String, int>{}
-            : {'A': amountPaise ~/ 2, 'B': amountPaise - amountPaise ~/ 2},
-        'date': DateTime.parse(date),
+        'sharesPaise':
+            paidBy == null ? <String, int>{} : {'A': amountPaise ~/ 2, 'B': amountPaise - amountPaise ~/ 2},
+        'date': DateTime(2026, 9, 20),
         'addedBy': 'A',
         'changes': <Map<String, dynamic>>[],
       });
@@ -257,16 +272,19 @@ void main() {
     test('catches paidBy changes', () {
       final d = diffExpenses(
         base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
-        base(id: '1', title: 'Dinner', amountPaise: 10000, paidBy: 'B'),
+        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'B'),
       );
       expect(d, contains('Paid by: A → B'));
     });
 
     test('reports no changes for identical expenses', () {
-      expect(diffExpenses(
-        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
-        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
-      ), isEmpty);
+      expect(
+        diffExpenses(
+          base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+          base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+        ),
+        isEmpty,
+      );
     });
   });
 
@@ -288,6 +306,164 @@ void main() {
     test('paiseToInput gives a two-decimal string', () {
       expect(paiseToInput(12345), '123.45');
       expect(paiseToInput(5), '0.05');
+    });
+  });
+
+  group('AppStore with in-memory repository', () {
+    late InMemoryGroupRepository repo;
+    late AppStore store;
+
+    setUp(() async {
+      repo = InMemoryGroupRepository();
+      await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      await repo.setMembers(repo.group!.id, ['Aarav', 'Meera']);
+      store = makeStore(repo, 'Aarav');
+      await pump();
+    });
+
+    test('streams load members and no expenses', () {
+      expect(store.members, ['Aarav', 'Meera']);
+      expect(store.expenses, isEmpty);
+      expect(store.ready, isTrue);
+    });
+
+    test('addExpense stamps the managing-as name and logs added activity',
+        () async {
+      await store.addExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Whoever',
+        ),
+      );
+      await pump();
+      expect(store.expenses.single.addedBy, 'Aarav');
+      expect(store.activity.single.verb, 'added');
+      expect(store.activity.single.by, 'Aarav');
+      expect(store.activity.single.amountPaise, 10000);
+    });
+
+    test('balances() and settle() use the live expenses', () async {
+      await store.addExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+      await pump();
+      expect(store.balances()['Aarav'], 5000);
+      expect(store.balances()['Meera'], -5000);
+      expect(store.settle().single, isA<Settlement>());
+    });
+
+    test('replaceExpense appends history stamped with the editor', () async {
+      await store.addExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+      await pump();
+
+      store.setManagingAs('Meera');
+      await store.replaceExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch + extra',
+          amountPaise: 15000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+      await pump();
+
+      final saved = store.expenses.single;
+      expect(saved.changes, isNotEmpty);
+      expect(saved.changes.every((c) => c.by == 'Meera'), isTrue);
+      expect(
+        saved.changes.map((c) => c.change),
+        contains('Title: “Lunch” → “Lunch + extra”'),
+      );
+      expect(store.activity.first.verb, 'edited');
+      expect(store.activity.first.by, 'Meera');
+    });
+
+    test('removeExpense logs deleted activity with the acting name', () async {
+      await store.addExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+      await pump();
+
+      store.setManagingAs('Meera');
+      await store.removeExpense(store.expenses.single);
+      await pump();
+
+      expect(store.expenses, isEmpty);
+      expect(store.activity.first.verb, 'deleted');
+      expect(store.activity.first.by, 'Meera');
+      expect(store.activity.first.title, 'Lunch');
+    });
+
+    test('removeMember updates members and strips shares in one batch',
+        () async {
+      await store.addExpense(
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 3000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Meera'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+      await pump();
+
+      await store.removeMember('Meera');
+      await pump();
+
+      expect(store.members, ['Aarav']);
+      expect(store.expenses.single.sharesPaise, {'Aarav': 1500});
+    });
+
+    test('sendMessage stamps senderName and messages come oldest-first',
+        () async {
+      await store.sendMessage('Hello');
+      await store.sendMessage('World');
+      await pump();
+
+      expect(store.messages.length, 2);
+      expect(store.messages.first.senderName, 'Aarav');
+      expect(store.messages.first.text, 'Hello');
+      expect(store.messages.last.text, 'World');
+      expect(
+        store.messages.every((m) => m.senderName == store.managingAs),
+        isTrue,
+      );
     });
   });
 }

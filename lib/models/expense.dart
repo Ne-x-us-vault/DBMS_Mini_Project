@@ -30,7 +30,6 @@ class Expense {
     this.sharesPaise = const {},
     required this.date,
     required this.addedBy,
-    this.ownerId = '',
     this.changes = const [],
   });
 
@@ -42,7 +41,6 @@ class Expense {
     required List<String> members,
     required DateTime date,
     required String addedBy,
-    String ownerId = '',
   }) {
     final n = members.length;
     final share = n == 0 ? amountPaise : amountPaise ~/ n;
@@ -60,7 +58,6 @@ class Expense {
       sharesPaise: shares,
       date: date,
       addedBy: addedBy,
-      ownerId: ownerId,
     );
   }
 
@@ -72,9 +69,6 @@ class Expense {
   final Map<String, int> sharesPaise;
   final DateTime date;
   final String addedBy;
-
-  /// Firebase Auth uid of the user who created this expense.
-  final String ownerId;
   final List<ExpenseChange> changes;
 
   bool get isEqualSplit {
@@ -99,7 +93,6 @@ class Expense {
         'sharesPaise': sharesPaise,
         'date': date,
         'addedBy': addedBy,
-        'ownerId': ownerId,
         'changes': [for (final c in changes) c.toMap()],
       };
 
@@ -115,7 +108,6 @@ class Expense {
       sharesPaise: shares,
       date: _toDateTime(map['date']),
       addedBy: map['addedBy'] as String? ?? '',
-      ownerId: map['ownerId'] as String? ?? '',
       changes: [
         for (final c in (map['changes'] as List?) ?? const [])
           ExpenseChange.fromMap((c as Map).cast<String, dynamic>()),

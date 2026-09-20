@@ -6,35 +6,36 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return signedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    // Expense documents must carry a positive paise amount.
+    function validExpense() {
+      return request.resource.data.amountPaise is int
+        && request.resource.data.amountPaise > 0;
     }
 
-    function isOwner(uid) {
-      return signedIn() && request.auth.uid == uid;
+    // Message documents must carry a non-empty text string.
+    function validMessage() {
+      return request.resource.data.text is string
+        && request.resource.data.text.size() > 0;
     }
 
-    // Anyone signed in can read shared data.
-    match /users/{uid} {
-      allow read: if signedIn();
-      allow write: if isAdmin();
-      allow create: if isOwner(uid) && request.resource.data.name is string;
-    }
+    match /groups/{groupId} {
+      allow read, write: if signedIn();
 
-    match /expenses/{id} {
-      allow read, create: if signedIn();
-      allow update, delete: if isAdmin()
-        || isOwner(resource.data.ownerId);
-    }
+      match /expenses/{expenseId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && validExpense();
+        allow delete: if signedIn();
+      }
 
-    match /activity/{id} {
-      allow read, create: if signedIn();
-      allow delete: if isAdmin();
-    }
+      match /activity/{activityId} {
+        allow read, write: if signedIn();
+      }
 
-    match /messages/{id} {
-      allow read, create: if signedIn();
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && validMessage();
+        allow delete: if signedIn();
+      }
     }
   }
 }

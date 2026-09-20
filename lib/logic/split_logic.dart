@@ -54,6 +54,26 @@ List<Settlement> computeSettlements(
   return out;
 }
 
+/// Returns a copy of [e] with [member] removed from `sharesPaise`.
+///
+/// Used when a member leaves a group: their share is stripped out of every
+/// expense. Tracking-only expenses (no shares) are returned unchanged.
+Expense stripMemberFromShares(Expense e, String member) {
+  if (!e.split || !e.sharesPaise.containsKey(member)) return e;
+  final shares = Map<String, int>.of(e.sharesPaise)..remove(member);
+  return Expense(
+    id: e.id,
+    title: e.title,
+    amountPaise: e.amountPaise,
+    split: e.split,
+    paidBy: e.paidBy,
+    sharesPaise: shares,
+    date: e.date,
+    addedBy: e.addedBy,
+    changes: e.changes,
+  );
+}
+
 List<String> diffExpenses(Expense before, Expense after) {
   final d = <String>[];
   if (before.split != after.split) {

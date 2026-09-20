@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/models.dart';
 import '../store/app_store.dart';
 
 class ChatScreen extends StatelessWidget {
@@ -61,7 +62,7 @@ class _ChatViewState extends State<_ChatView> {
               itemCount: messages.length,
               itemBuilder: (context, i) => _Bubble(
                 message: messages[i],
-                isMine: messages[i].byUid == widget.store.myUid,
+                isMine: messages[i].senderName == widget.store.managingAs,
               ),
             ),
       bottomNavigationBar: _InputBar(controller: _controller, onSend: _send),
@@ -72,7 +73,7 @@ class _ChatViewState extends State<_ChatView> {
 class _Bubble extends StatelessWidget {
   const _Bubble({required this.message, required this.isMine});
 
-  final dynamic message;
+  final ChatMessage message;
   final bool isMine;
 
   @override
@@ -105,7 +106,7 @@ class _Bubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 2),
                 child: Text(
-                  message.by,
+                  message.senderName,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
