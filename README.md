@@ -4,14 +4,14 @@
 
 ## How it works in simple words
 
-- Several phones share **one group** of expenses. Everything the group does (expenses, edits, history, chat) is stored in the cloud (Firestore) and stays in sync on every phone in real time.
-- There are **no accounts or passwords**. The app signs in to Firebase anonymously; a phone in a group is just a device with that group.
-- On first launch you either **"Create group"** (type groups name + your name) or **"Join group"** (enter the group's code).
-- The **group code is the Firestore document id** — a string of characters shown inside the app with a copy button. Send it to friends on other phones and they join the same group.
-- When someone joins, they pick which **member name to act as** ("Managing as") — an existing member, or their own new name. This name is stamped on the expenses, history and chat messages they create.
-- The **only things kept on your phone** are the group id you joined and your "Managing as" name (shared_preferences). Nothing else is local; the group data is the single source of truth in the cloud.
+- Several phones share **groups** of expenses. Everything a group does (expenses, edits, history, chat) is stored in the cloud (Firestore) and stays in sync on every phone in real time.
+- There are **no passwords**. The app signs in to Firebase anonymously; your "account" is just the name you pick on the login screen (`users/{uid}.displayName`).
+- After login you land on **Home** (My groups). If you have no groups yet it shows **Create group** / **Join group** buttons; once you have groups they are **listed on Home** and the create action becomes a **floating + button in the bottom-right corner**.
+- The **group code is the Firestore document id** — shown inside a group with a copy button. Send it to friends on other phones and they join the same group (from Home → floating + → Join group).
+- Joining a group records a **membership** for your account (`users/{uid}/groups/{groupId}`) and you pick which **member name to act as** ("Managing as") — an existing member, or your own new name. That name is stamped on the expenses, history and chat messages you create.
+- The **only thing kept on your phone** is your display name (is it a new device?) plus the currently open group, via `shared_preferences`. Everything else is the cloud source of truth, so your groups appear after any reinstall with the same display name.
 - Expenses, edits and deletions are each **one atomic write** together with their history entry, so the expense and its activity record always stay consistent even when people edit on different phones at the same time.
-- Each phone shows "Managing as" next to messages it sent and adds its own member name, but every phone sees the same, live, up-to-date data.
+- Each phone shows "Managing as" next to messages it sent and its own member chip marked **(you)**, but every phone sees the same, live, up-to-date data.
 
 ## Quick reference
 
@@ -21,19 +21,19 @@
 | UI           | Material 3 (`ColorScheme.fromSeed`, teal)                    |
 | Auth         | Firebase **Anonymous Auth**                                   |
 | Backend      | Firebase Cloud Firestore (real-time)                         |
-| On-device    | `shared_preferences` (group id + "Managing as" name only)    |
+| On-device    | `shared_preferences` (display name + currently-open group)  |
 | State        | `AppStore` (`ChangeNotifier`) + `ListenableBuilder`          |
 | Data access  | `GroupRepository` interface (Firestore impl + test fake)     |
 | Linting      | `flutter_lints ^6.0.0`                                       |
 | Tests        | `flutter_test` — pure logic + store-vs-fake-repository        |
 
-Commands: `flutter run` / `flutter analyze` / `flutter test` (currently 24/24 pass).
+Commands: `flutter run` / `flutter analyze` / `flutter test` (currently 30/30 pass).
 
 ## Structure
 
 ```
 lib/
-├── main.dart                     # Firebase init, anonymous auth, group gate (AppBootstrap), tabs
+├── main.dart                     # Firebase init, anonymous auth, login/home gate (AppBootstrap)
 ├── firebase_options.dart         # Auto-generated config (project split-chat-007)
 ├── models/
 │   ├── expense.dart              # Expense, ExpenseChange (integer paise)
@@ -43,16 +43,19 @@ lib/
 ├── utils/money.dart              # paise math + formatting
 ├── services/
 │   ├── group_repository.dart     # abstract repository (streams + mutations)
-│   ├── firestore_repository.dart # Firestore implementation (batched writes, arrayUnion)
-│   └── local_session.dart        # shared_preferences: groupId + managingAs
-├── store/app_store.dart          # subscribes to repo streams, notifyListeners
+│   ├── firestore_repository.dart # Firestore implementation (batched writes, arrayUnion, memberships)
+│   └── local_session.dart        # shared_preferences: display name + current group
+├── store/app_store.dart          # subscribes to repo streams, notifyListeners (per group)
 └── screens/
-    ├── group_screen.dart         # Create group / Join group / pick member
+    ├── login_screen.dart         # pick your identity name (no password)
+    ├── home_page.dart            # My groups list + empty create/join + floating + (create/join)
+    ├── group_detail_screen.dart  # one group: Splits+Chat tabs, back + leave group
+    ├── group_screen.dart         # JoinSetupScreen: pick "Managing as" member
     ├── splits_screen.dart        # expenses, splits, history, people, balances, settlements
     └── chat_screen.dart          # chat bubbles ("mine" = own managing name)
 test/
 ├── fake_group_repository.dart    # in-memory repository for tests
-└── splits_test.dart              # pure-logic + AppStore tests (24 tests)
+└── splits_test.dart              # pure-logic + AppStore + membership tests (30 tests)
 ```
 
 ## Firestore layout
@@ -61,6 +64,8 @@ test/
 - `groups/{groupId}/expenses/{id}` → `{title, amountPaise, split, paidBy, sharesPaise, date: Timestamp, addedBy, changes: [{by, change, at: Timestamp}]}`.
 - `groups/{groupId}/activity/{id}` → `{by, verb, title, amountPaise, at}` (`verb` ∈ `added|edited|deleted`).
 - `groups/{groupId}/messages/{id}` → `{senderName, text, createdAt}`.
+- `users/{uid}` → `{displayName, createdAt}` — the account's identity name.
+- `users/{uid}/groups/{groupId}` → `{name, joinedAt}` — a membership; Home lists these live.
 
 ## Architecture notes
 
@@ -68,7 +73,8 @@ test/
 - **Real-time sync**: the store subscribes to four snapshots — group doc, expenses (**`orderBy(date, descending)`**), latest 30 activity (**`orderBy(at, descending).limit(30)`**), latest 50 messages (**`orderBy(createdAt, descending).limit(50)`**, reversed in the store so chat renders oldest→newest).
 - **Atomic writes** (Firestore `WriteBatch`):
   - `addExpense` / `replaceExpense` / `removeExpense` = expense doc op + activity entry in one batch.
-  - `removeMember` = `members` `arrayRemove` + strip that member from every expense's `sharesPaise` in one batch (uses `stripMemberFromShares`).
+  - `removeMember` / `leaveGroup` = `members` `arrayRemove`/`arrayUnion` + strip that member from every expense's `sharesPaise` (+ membership deletion for leave) in one batch (uses `stripMemberFromShares`).
+  - `createGroup` / `joinGroup` = group write + the account's membership row in one batch (`arrayUnion` keeps "Managing as" names unique).
   - `replaceExpense` appends edit history with `FieldValue.arrayUnion` so concurrent edits on different phones don't overwrite `changes`.
 - **Money** is integer paise end-to-end (`toPaise`/`fmtPaise`/`paiseToInput`); no floats.
 - **Permissions UI-free**: anyone in the group edits/deletes anything; identity is only the chosen name for history/chat. Real validation lives in `firestore.rules` (signed-in only; `amountPaise` int > 0; `text` non-empty).
@@ -81,4 +87,4 @@ test/
 
 ## Testing
 
-Pure-logic groups (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` groups (stream load, add/replace/remove expense with stamped history + activity, removeMember batch, chat senderName/ordering). `flutter analyze` clean, `flutter test` 24/24.
+Pure-logic groups (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` groups (stream load, add/replace/remove expense with stamped history + activity, removeMember batch, chat senderName/ordering) and membership tests (`myGroups`, `joinGroup` dedupe, `leaveGroup` strips shares, unknown-code throws). `flutter analyze` clean, `flutter test` 30/30.

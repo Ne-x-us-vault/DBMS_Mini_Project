@@ -37,5 +37,14 @@ service cloud.firestore {
         allow delete: if signedIn();
       }
     }
+
+    // Each account only reads/writes its own membership doc and list.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+
+      match /groups/{groupId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+    }
   }
 }

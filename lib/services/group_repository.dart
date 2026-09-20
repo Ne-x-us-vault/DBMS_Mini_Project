@@ -9,10 +9,28 @@ import '../models/models.dart';
 abstract class GroupRepository {
   /// Creates a new group with one initial member. Returns the group
   /// (its `id` is the auto-generated Firestore document id / group code).
+  /// The caller's account is also recorded as a member.
   Future<GroupInfo> createGroup({
     required String name,
     required String member,
   });
+
+  /// Real-time list of groups the signed-in account has joined
+  /// (via `users/{uid}/groups` memberships). Deleted groups are skipped.
+  Stream<List<GroupInfo>> myGroups();
+
+  /// Joins the signed-in account to an existing group, acting as [name].
+  /// [name] joins the group's members only if it is not already present.
+  /// Throws if the group does not exist.
+  Future<GroupInfo> joinGroup(String groupId, {required String name});
+
+  /// Leaves a group: deletes the account's membership, removes [name] from
+  /// the group's members and strips it from the shares of every expense in
+  /// one atomic batched write.
+  Future<void> leaveGroup(String groupId, {required String name});
+
+  /// Records the signed-in account's display (identity) name.
+  Future<void> setDisplayName(String name);
 
   /// Reads a group by code. Returns `null` if it does not exist.
   Future<GroupInfo?> fetchGroup(String groupId);

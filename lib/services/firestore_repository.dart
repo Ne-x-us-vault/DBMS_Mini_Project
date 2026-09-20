@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../logic/split_logic.dart';
 import '../models/expense.dart';
@@ -12,6 +13,8 @@ import 'group_repository.dart';
 /// - `groups/{groupId}/expenses/{id}` — Expense map, `date` as Timestamp
 /// - `groups/{groupId}/activity/{id}` — `{by, verb, title, amountPaise, at}`
 /// - `groups/{groupId}/messages/{id}` — `{senderName, text, createdAt}`
+/// - `users/{uid}` — `{displayName, createdAt}`
+/// - `users/{uid}/groups/{groupId}` — `{name, joinedAt}` (memberships)
 class FirestoreGroupRepository implements GroupRepository {
   FirestoreGroupRepository({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
@@ -23,6 +26,20 @@ class FirestoreGroupRepository implements GroupRepository {
 
   DocumentReference<Map<String, dynamic>> _group(String id) =>
       _groups.doc(id);
+
+  String get _uid {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) {
+      throw StateError('Not signed in');
+    }
+    return u.uid;
+  }
+
+  CollectionReference<Map<String, dynamic>> _memberships() =>
+      _db.collection('users').doc(_uid).collection('groups');
+
+  DocumentReference<Map<String, dynamic>> _membership(String groupId) =>
+      _memberships().doc(groupId);
 
   CollectionReference<Map<String, dynamic>> _expenses(String groupId) =>
       _group(groupId).collection('expenses');
@@ -98,12 +115,89 @@ class FirestoreGroupRepository implements GroupRepository {
     required String member,
   }) async {
     final ref = _groups.doc();
-    await ref.set({
+    final batch = _db.batch();
+    batch.set(ref, {
       'name': name,
       'members': [member],
       'createdAt': FieldValue.serverTimestamp(),
     });
+    batch.set(_membership(ref.id), {
+      'name': member,
+      'joinedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
     return GroupInfo(id: ref.id, name: name, members: [member]);
+  }
+
+  @override
+  Future<void> setDisplayName(String name) async {
+    await _db.collection('users').doc(_uid).set(
+          {
+            'displayName': name,
+            'createdAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+  }
+
+  @override
+  Stream<List<GroupInfo>> myGroups() {
+    return _memberships().snapshots().asyncMap((snap) async {
+      final groups = <GroupInfo>[];
+      for (final m in snap.docs) {
+        final g = await _group(m.id).get();
+        if (g.exists) {
+          groups.add(_groupFromDoc(g.id, g.data()!));
+        }
+      }
+      groups.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return groups;
+    });
+  }
+
+  @override
+  Future<GroupInfo> joinGroup(
+    String groupId, {
+    required String name,
+  }) async {
+    final snap = await _group(groupId).get();
+    if (!snap.exists) {
+      throw Exception('Group $groupId does not exist');
+    }
+    final batch = _db.batch();
+    batch.update(_group(groupId), {
+      'members': FieldValue.arrayUnion([name]),
+    });
+    batch.set(_membership(groupId), {
+      'name': name,
+      'joinedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    return _groupFromDoc(snap.id, snap.data()!);
+  }
+
+  @override
+  Future<void> leaveGroup(
+    String groupId, {
+    required String name,
+  }) async {
+    final batch = _db.batch();
+    final groupSnap = await _group(groupId).get();
+    if (groupSnap.exists) {
+      batch.update(_group(groupId), {
+        'members': FieldValue.arrayRemove([name]),
+      });
+      final expensesSnap = await _expenses(groupId).get();
+      for (final d in expensesSnap.docs) {
+        final e = _expenseFromDoc(d.id, d.data());
+        final stripped = stripMemberFromShares(e, name);
+        batch.update(_expenses(groupId).doc(d.id), {
+          'sharesPaise': stripped.sharesPaise,
+        });
+      }
+    }
+    batch.delete(_membership(groupId));
+    await batch.commit();
   }
 
   @override

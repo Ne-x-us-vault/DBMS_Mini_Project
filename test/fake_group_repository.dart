@@ -14,11 +14,14 @@ class InMemoryGroupRepository implements GroupRepository {
   final List<Expense> _expenses = [];
   final List<Activity> _activity = [];
   final List<ChatMessage> _messages = [];
+  final Set<String> _joined = {};
+  String? displayName;
 
   final _groupCtrl = StreamController<GroupInfo?>.broadcast();
   final _expCtrl = StreamController<List<Expense>>.broadcast();
   final _actCtrl = StreamController<List<Activity>>.broadcast();
   final _msgCtrl = StreamController<List<ChatMessage>>.broadcast();
+  final _membersCtrl = StreamController<List<GroupInfo>>.broadcast();
 
   int _seq = 0;
 
@@ -33,6 +36,13 @@ class InMemoryGroupRepository implements GroupRepository {
     final sortedMessages = [..._messages]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     _msgCtrl.add(sortedMessages.take(50).toList());
+    _emitMembers();
+  }
+
+  void _emitMembers() {
+    _membersCtrl.add(_group != null && _joined.contains(_group!.id)
+        ? [_group!]
+        : const []);
   }
 
   /// The group as currently held, for direct assertions.
@@ -44,12 +54,58 @@ class InMemoryGroupRepository implements GroupRepository {
     required String member,
   }) async {
     _group = GroupInfo(id: 'g-${_seq++}', name: name, members: [member]);
+    _joined.add(_group!.id);
     _emit();
     return _group!;
   }
 
   @override
-  Future<GroupInfo?> fetchGroup(String groupId) async => _group;
+  Future<void> setDisplayName(String name) async {
+    displayName = name;
+  }
+
+  @override
+  Stream<List<GroupInfo>> myGroups() {
+    Future(() => _emitMembers());
+    return _membersCtrl.stream;
+  }
+
+  @override
+  Future<GroupInfo?> fetchGroup(String groupId) async {
+    if (_group != null && _group!.id == groupId) return _group;
+    return null;
+  }
+
+  @override
+  Future<GroupInfo> joinGroup(String groupId, {required String name}) async {
+    if (_group == null || _group!.id != groupId) {
+      throw Exception('Group $groupId does not exist');
+    }
+    _group = GroupInfo(
+      id: _group!.id,
+      name: _group!.name,
+      members: [..._group!.members, if (!_group!.members.contains(name)) name],
+    );
+    _joined.add(groupId);
+    _emit();
+    return _group!;
+  }
+
+  @override
+  Future<void> leaveGroup(String groupId, {required String name}) async {
+    if (_group != null && _group!.id == groupId) {
+      _joined.remove(groupId);
+      _group = GroupInfo(
+        id: _group!.id,
+        name: _group!.name,
+        members: [..._group!.members]..remove(name),
+      );
+      for (var i = 0; i < _expenses.length; i++) {
+        _expenses[i] = stripMemberFromShares(_expenses[i], name);
+      }
+      _emit();
+    }
+  }
 
   @override
   Stream<GroupInfo?> watchGroup(String groupId) {

@@ -466,4 +466,74 @@ void main() {
       );
     });
   });
+
+  group('memberships', () {
+    late InMemoryGroupRepository repo;
+
+    setUp(() => repo = InMemoryGroupRepository());
+
+    test('createGroup records a membership and myGroups lists it', () async {
+      await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      final list = await repo.myGroups().first;
+      expect(list.length, 1);
+      expect(list.single.id, repo.group!.id);
+      expect(list.single.name, 'Roommates');
+      expect(list.single.members, contains('Aarav'));
+    });
+
+    test('joinGroup adds the acting name and the membership appears',
+        () async {
+      final g = await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      final joined = await repo.joinGroup(g.id, name: 'Zara');
+      expect(joined.members, containsAll(['Aarav', 'Zara']));
+      final list = await repo.myGroups().first;
+      expect(list.single.members, containsAll(['Aarav', 'Zara']));
+    });
+
+    test('joinGroup with an existing name does not duplicate it', () async {
+      final g = await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      final joined = await repo.joinGroup(g.id, name: 'Aarav');
+      final count = joined.members.where((m) => m == 'Aarav').length;
+      expect(count, 1);
+    });
+
+    test('joinGroup for an unknown code throws', () async {
+      await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      await expectLater(
+        repo.joinGroup('nope', name: 'Aarav'),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('leaveGroup removes the membership and strips the shares', () async {
+      final g = await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      await repo.joinGroup(g.id, name: 'Zara');
+      await repo.setMembers(g.id, ['Aarav', 'Zara']);
+      await repo.addExpense(
+        g.id,
+        Expense.equalSplit(
+          id: 'e1',
+          title: 'Lunch',
+          amountPaise: 10000,
+          paidBy: 'Aarav',
+          members: ['Aarav', 'Zara'],
+          date: DateTime(2026, 9, 20),
+          addedBy: 'Aarav',
+        ),
+      );
+
+      await repo.leaveGroup(g.id, name: 'Zara');
+
+      final list = await repo.myGroups().first;
+      expect(list, isEmpty);
+      expect(repo.group!.members, ['Aarav']);
+      final expenses = await repo.watchExpenses(g.id).first;
+      expect(expenses.single.sharesPaise, {'Aarav': 5000});
+    });
+
+    test('setDisplayName is recorded', () async {
+      await repo.setDisplayName('Aarav');
+      expect(repo.displayName, 'Aarav');
+    });
+  });
 }
