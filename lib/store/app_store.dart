@@ -1,158 +1,153 @@
-import 'dart:convert';
+import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../logic/split_logic.dart';
 import '../models/expense.dart';
-import '../utils/money.dart';
-
-class Activity {
-  const Activity({
-    required this.by,
-    required this.verb,
-    required this.title,
-    this.amountPaise,
-    required this.at,
-  });
-
-  final String by;
-  final String verb;
-  final String title;
-  final int? amountPaise;
-  final DateTime at;
-}
-
-class Settlement {
-  const Settlement(this.from, this.to, this.amountPaise);
-
-  final String from;
-  final String to;
-  final int amountPaise;
-}
+import '../models/models.dart';
 
 class AppStore extends ChangeNotifier {
-  static const _key = 'split_chat_store';
+  AppStore({FirebaseAuth? auth, FirebaseFirestore? firestore})
+      : _auth = auth ?? FirebaseAuth.instance,
+        _db = firestore ?? FirebaseFirestore.instance;
 
-  List<String> members = [];
-  List<Expense> expenses = [];
-  List<Activity> activity = [];
-  String currentUser = 'Aarav';
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _db;
+  final List<StreamSubscription> _subs = [];
 
-  Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw == null) {
-      members = ['Aarav', 'Meera'];
-      currentUser = 'Aarav';
-      await save();
-      return;
-    }
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    members = (data['members'] as List).cast<String>();
-    expenses = [
-      for (final e in (data['expenses'] as List))
-        Expense.fromJson((e as Map).cast<String, Object?>()),
+  List<UserProfile> users = const [];
+  List<Expense> expenses = const [];
+  List<Activity> activity = const [];
+  List<ChatMessage> messages = const [];
+
+  UserProfile? _profile;
+
+  UserProfile? get profile => _profile;
+  String get myUid => _auth.currentUser?.uid ?? '';
+  String get myName => _profile?.name ?? _auth.currentUser?.displayName ?? 'Me';
+  bool get isAdmin => _profile?.isAdmin ?? false;
+  bool get loaded => _profile != null;
+
+  List<String> get members => [for (final u in users) u.name];
+
+  bool canEdit(Expense e) => isAdmin || e.ownerId == myUid;
+  bool canDelete(Expense e) => canEdit(e);
+
+  DateTime _ts(Object? v) {
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is String) return DateTime.parse(v).toLocal();
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  Map<String, dynamic> _readExpenseMap(Map<String, dynamic> raw) {
+    final m = Map<String, dynamic>.from(raw);
+    m['date'] = _ts(m['date']);
+    m['changes'] = [
+      for (final c in (raw['changes'] as List?) ?? const [])
+        {
+          'by': (c as Map)['by'],
+          'change': c['change'],
+          'at': _ts(c['at']),
+        },
     ];
-    currentUser = (data['currentUser'] as String?) ?? '';
-    if (!members.contains(currentUser) && members.isNotEmpty) {
-      currentUser = members.first;
+    return m;
+  }
+
+  Map<String, Object?> _expenseDoc(Expense e) => {
+        ...e.toMap(),
+        'date': Timestamp.fromDate(e.date),
+        'changes': [
+          for (final c in e.changes)
+            {
+              'by': c.by,
+              'change': c.change,
+              'at': Timestamp.fromDate(c.at),
+            },
+        ],
+      };
+
+  Future<void> init() async {
+    _subs.add(_db.collection('users').snapshots().listen(_onUsers,
+        onError: (_) {}));
+    _subs.add(_db
+        .collection('expenses')
+        .orderBy('date', descending: true)
+        .snapshots()
+        .listen(_onExpenses, onError: (_) {}));
+    _subs.add(_db
+        .collection('activity')
+        .orderBy('at', descending: true)
+        .limit(50)
+        .snapshots()
+        .listen(_onActivity, onError: (_) {}));
+    _subs.add(_db
+        .collection('messages')
+        .orderBy('at', descending: false)
+        .snapshots()
+        .listen(_onMessages, onError: (_) {}));
+  }
+
+  void _onUsers(QuerySnapshot<Map<String, dynamic>> snap) {
+    users = [
+      for (final d in snap.docs)
+        UserProfile(
+          uid: d.id,
+          email: d.data()['email'] as String? ?? '',
+          name: d.data()['name'] as String? ?? '',
+          role: d.data()['role'] as String? ?? 'member',
+        ),
+    ];
+    for (final u in users) {
+      if (u.uid == myUid) {
+        _profile = u;
+        break;
+      }
     }
-    if (currentUser.isEmpty) currentUser = 'Aarav';
+    notifyListeners();
+  }
+
+  void _onExpenses(QuerySnapshot<Map<String, dynamic>> snap) {
+    expenses = [
+      for (final d in snap.docs)
+        Expense.fromMap(_readExpenseMap(Map.of(d.data()))),
+    ];
+    notifyListeners();
+  }
+
+  void _onActivity(QuerySnapshot<Map<String, dynamic>> snap) {
     activity = [
-      for (final a in (data['activity'] as List?) ?? const [])
+      for (final d in snap.docs)
         Activity(
-          by: (a as Map)['by'] as String,
-          verb: a['verb'] as String,
-          title: a['title'] as String,
-          amountPaise: a['amountPaise'] as int?,
-          at: DateTime.parse(a['at'] as String),
+          by: d.data()['by'] as String? ?? '',
+          byUid: d.data()['byUid'] as String? ?? '',
+          verb: d.data()['verb'] as String? ?? '',
+          title: d.data()['title'] as String? ?? '',
+          amountPaise: (d.data()['amountPaise'] as num?)?.toInt(),
+          at: _ts(d.data()['at']),
         ),
     ];
     notifyListeners();
   }
 
-  Future<void> save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _key,
-      jsonEncode({
-        'members': members,
-        'expenses': [for (final e in expenses) e.toJson()],
-        'currentUser': currentUser,
-        'activity': [
-          for (final a in activity)
-            {
-              'by': a.by,
-              'verb': a.verb,
-              'title': a.title,
-              'amountPaise': a.amountPaise,
-              'at': a.at.toIso8601String(),
-            },
-        ],
-      }),
-    );
-  }
-
-  void setCurrentUser(String name) {
-    if (name == currentUser) return;
-    currentUser = name;
-    _commit();
-  }
-
-  void addMember(String name) {
-    if (name.isEmpty || members.contains(name)) return;
-    members.add(name);
-    _commit();
-  }
-
-  void removeMember(String name) {
-    members.remove(name);
-    for (var i = 0; i < expenses.length; i++) {
-      final e = expenses[i];
-      final shares = {...e.sharesPaise}..remove(name);
-      if (shares.length != e.sharesPaise.length) {
-        expenses[i] = Expense(
-          id: e.id,
-          title: e.title,
-          amountPaise: e.amountPaise,
-          split: e.split,
-          paidBy: e.paidBy,
-          sharesPaise: shares,
-          date: e.date,
-          addedBy: e.addedBy,
-          changes: e.changes,
-        );
-      }
-    }
-    _commit();
-  }
-
-  void addExpense(Expense e) {
-    expenses.add(e);
-    activity.insert(
-      0,
-      Activity(
-        by: e.addedBy,
-        verb: 'added',
-        title: e.title,
-        amountPaise: e.amountPaise,
-        at: DateTime.now(),
-      ),
-    );
-    _commit();
-  }
-
-  void replaceExpense(Expense e) {
-    final i = expenses.indexWhere((x) => x.id == e.id);
-    if (i == -1) return;
-    final before = expenses[i];
-    final diffs = _diff(before, e);
-    final changes = <ExpenseChange>[
-      ...before.changes,
-      for (final d in diffs)
-        ExpenseChange(by: currentUser, change: d, at: DateTime.now()),
+  void _onMessages(QuerySnapshot<Map<String, dynamic>> snap) {
+    messages = [
+      for (final d in snap.docs)
+        ChatMessage(
+          id: d.id,
+          text: d.data()['text'] as String? ?? '',
+          by: d.data()['by'] as String? ?? '',
+          byUid: d.data()['byUid'] as String? ?? '',
+          at: _ts(d.data()['at']),
+        ),
     ];
-    expenses[i] = Expense(
+    notifyListeners();
+  }
+
+  Future<void> addExpense(Expense e) async {
+    final stamped = Expense(
       id: e.id,
       title: e.title,
       amountPaise: e.amountPaise,
@@ -160,123 +155,94 @@ class AppStore extends ChangeNotifier {
       paidBy: e.paidBy,
       sharesPaise: e.sharesPaise,
       date: e.date,
-      addedBy: e.addedBy,
+      addedBy: myName,
+      ownerId: myUid,
+    );
+    await _db.collection('expenses').doc(e.id).set(_expenseDoc(stamped));
+    await _log('added', stamped.title, stamped.amountPaise);
+  }
+
+  Future<void> replaceExpense(Expense e) async {
+    final ref = _db.collection('expenses').doc(e.id);
+    final snap = await ref.get();
+    if (!snap.exists) return;
+    final before = Expense.fromMap(_readExpenseMap(snap.data()!));
+    final diffs = diffExpenses(before, e);
+    final changes = <ExpenseChange>[
+      ...before.changes,
+      for (final d in diffs)
+        ExpenseChange(by: myName, change: d, at: DateTime.now()),
+    ];
+    final updated = Expense(
+      id: e.id,
+      title: e.title,
+      amountPaise: e.amountPaise,
+      split: e.split,
+      paidBy: e.paidBy,
+      sharesPaise: e.sharesPaise,
+      date: e.date,
+      addedBy: before.addedBy,
+      ownerId: before.ownerId,
       changes: changes,
     );
+    await ref.set(_expenseDoc(updated));
     if (diffs.isNotEmpty) {
-      activity.insert(
-        0,
-        Activity(
-          by: currentUser,
-          verb: 'edited',
-          title: e.title,
-          amountPaise: e.amountPaise,
-          at: DateTime.now(),
-        ),
-      );
+      await _log('edited', updated.title, updated.amountPaise);
     }
-    _commit();
   }
 
-  void removeExpense(String id) {
-    final i = expenses.indexWhere((e) => e.id == id);
-    if (i == -1) return;
-    final e = expenses.removeAt(i);
-    activity.insert(
-      0,
-      Activity(
-        by: currentUser,
-        verb: 'deleted',
-        title: e.title,
-        amountPaise: e.amountPaise,
-        at: DateTime.now(),
-      ),
-    );
-    _commit();
+  Future<void> removeExpense(String id) async {
+    final ref = _db.collection('expenses').doc(id);
+    final snap = await ref.get();
+    if (!snap.exists) return;
+    final e = Expense.fromMap(_readExpenseMap(snap.data()!));
+    if (!canEdit(e)) return;
+    await ref.delete();
+    await _log('deleted', e.title, e.amountPaise);
   }
 
-  void clearActivity() {
-    if (activity.isEmpty) return;
-    activity.clear();
-    _commit();
+  Future<void> clearActivity() async {
+    final snap = await _db.collection('activity').get();
+    for (final d in snap.docs) {
+      await d.reference.delete();
+    }
   }
 
-  List<String> _diff(Expense before, Expense after) {
-    final d = <String>[];
-    if (before.split != after.split) {
-      d.add(after.split ? 'Expense is now split' : 'Expense is no longer split');
-    }
-    if (before.title != after.title) {
-      d.add('Title: “${before.title}” → “${after.title}”');
-    }
-    if (before.amountPaise != after.amountPaise) {
-      d.add(
-        'Amount: ${fmtPaise(before.amountPaise)} → ${fmtPaise(after.amountPaise)}',
-      );
-    }
-    if (before.split && after.split && before.paidBy != after.paidBy) {
-      d.add('Paid by: ${before.paidBy ?? '-'} → ${after.paidBy ?? '-'}');
-    }
-    final bShares =
-        before.sharesPaise.entries.map((e) => '${e.key}:${e.value}').toList()
-          ..sort();
-    final aShares =
-        after.sharesPaise.entries.map((e) => '${e.key}:${e.value}').toList()
-          ..sort();
-    if (!listEquals(bShares, aShares)) {
-      d.add(
-        'Shares: ${fmtShares(before.sharesPaise)} → ${fmtShares(after.sharesPaise)}',
-      );
-    }
-    final bd = before.date;
-    final ad = after.date;
-    if (bd.year != ad.year || bd.month != ad.month || bd.day != ad.day) {
-      d.add(
-        'Date: ${bd.day}/${bd.month}/${bd.year} → ${ad.day}/${ad.month}/${ad.year}',
-      );
-    }
-    return d;
+  Future<void> sendMessage(String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    await _db.collection('messages').add({
+      'text': t,
+      'by': myName,
+      'byUid': myUid,
+      'at': FieldValue.serverTimestamp(),
+    });
   }
 
-  void _commit() {
-    notifyListeners();
-    save();
+  Future<void> setRole(String uid, String role) async {
+    await _db.collection('users').doc(uid).update({'role': role});
   }
 
-  Map<String, int> balances() {
-    final b = <String, int>{for (final m in members) m: 0};
-    for (final e in expenses) {
-      if (!e.split) continue;
-      final payer = e.paidBy;
-      if (payer != null) b[payer] = (b[payer] ?? 0) + e.amountPaise;
-      e.sharesPaise.forEach((m, share) {
-        b[m] = (b[m] ?? 0) - share;
-      });
-    }
-    return b;
+  Future<void> removeUser(String uid) async {
+    await _db.collection('users').doc(uid).delete();
   }
 
-  List<Settlement> settle() {
-    final b = balances();
-    final debtors = b.entries.where((e) => e.value < 0).toList()
-      ..sort((a, b) => a.value.compareTo(b.value));
-    final creditors = b.entries.where((e) => e.value > 0).toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+  Future<void> _log(String verb, String title, int? amount) async {
+    await _db.collection('activity').add({
+      'by': myName,
+      'byUid': myUid,
+      'verb': verb,
+      'title': title,
+      'amountPaise': amount,
+      'at': FieldValue.serverTimestamp(),
+    });
+  }
 
-    final out = <Settlement>[];
-    var ci = 0;
-    for (final d in debtors) {
-      var rest = -d.value;
-      while (rest > 0 && ci < creditors.length) {
-        final creditor = creditors[ci];
-        final available = creditor.value;
-        final pay = rest < available ? rest : available;
-        out.add(Settlement(d.key, creditor.key, pay));
-        creditors[ci] = MapEntry(creditor.key, available - pay);
-        rest -= pay;
-        if (available - pay == 0) ci++;
-      }
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
     }
-    return out;
+    super.dispose();
   }
 }

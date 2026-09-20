@@ -1,16 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:split_chat/logic/split_logic.dart';
 import 'package:split_chat/models/expense.dart';
-import 'package:split_chat/store/app_store.dart';
+import 'package:split_chat/utils/money.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   group('Expense.equalSplit', () {
     test('splits evenly and puts leftover paise on the last member', () {
       final e = Expense.equalSplit(
@@ -43,6 +37,29 @@ void main() {
       );
       expect(e.sharesPaise['A'], 500);
     });
+
+    test('toMap/fromMap round-trips fields', () {
+      final e = Expense.equalSplit(
+        id: 'x',
+        title: 'Dinner',
+        amountPaise: 101,
+        paidBy: 'A',
+        members: ['A', 'B'],
+        date: DateTime(2026, 9, 20, 14, 30),
+        addedBy: 'A',
+        ownerId: 'uid-1',
+      );
+      final copy = Expense.fromMap(e.toMap());
+      expect(copy.id, e.id);
+      expect(copy.title, e.title);
+      expect(copy.amountPaise, e.amountPaise);
+      expect(copy.split, e.split);
+      expect(copy.paidBy, e.paidBy);
+      expect(copy.sharesPaise, e.sharesPaise);
+      expect(copy.addedBy, e.addedBy);
+      expect(copy.ownerId, e.ownerId);
+      expect(copy.date, e.date);
+    });
   });
 
   group('Expense.split flag', () {
@@ -61,11 +78,11 @@ void main() {
     });
   });
 
-  group('AppStore.balances', () {
+  group('computeBalances', () {
     test('equal split: payer gains, others lose share', () {
-      final store = AppStore()
-        ..members = ['A', 'B']
-        ..expenses = [
+      final b = computeBalances(
+        ['A', 'B'],
+        [
           Expense.equalSplit(
             id: '1',
             title: 'Lunch',
@@ -75,17 +92,16 @@ void main() {
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
-
-      final b = store.balances();
+        ],
+      );
       expect(b['A'], 5000);
       expect(b['B'], -5000);
     });
 
     test('manual split honours custom shares', () {
-      final store = AppStore()
-        ..members = ['A', 'B', 'C']
-        ..expenses = [
+      final b = computeBalances(
+        ['A', 'B', 'C'],
+        [
           Expense(
             id: '1',
             title: 'Dinner',
@@ -96,19 +112,17 @@ void main() {
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
-
-      final b = store.balances();
+        ],
+      );
       expect(b['A'], 4000);
       expect(b['B'], -3000);
       expect(b['C'], -1000);
-      expect(store.expenses.first.isEqualSplit, isFalse);
     });
 
     test('tracking-only expense does not affect balances', () {
-      final store = AppStore()
-        ..members = ['A', 'B']
-        ..expenses = [
+      final b = computeBalances(
+        ['A', 'B'],
+        [
           Expense(
             id: '1',
             title: 'Groceries',
@@ -117,19 +131,18 @@ void main() {
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
-
-      expect(store.balances()['A'], 0);
-      expect(store.balances()['B'], 0);
-      expect(store.settle(), isEmpty);
+        ],
+      );
+      expect(b['A'], 0);
+      expect(b['B'], 0);
     });
   });
 
-  group('AppStore.settle', () {
+  group('computeSettlements', () {
     test('nets debts into a minimal set of transfers', () {
-      final store = AppStore()
-        ..members = ['A', 'B', 'C']
-        ..expenses = [
+      final result = computeSettlements(
+        ['A', 'B', 'C'],
+        [
           Expense.equalSplit(
             id: '1',
             title: 'Trip',
@@ -139,9 +152,8 @@ void main() {
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
-
-      final result = store.settle();
+        ],
+      );
       expect(result.length, 2);
       expect(result[0].from, 'B');
       expect(result[0].to, 'A');
@@ -152,9 +164,9 @@ void main() {
     });
 
     test('no transfers when everyone is settled', () {
-      final store = AppStore()
-        ..members = ['A', 'B']
-        ..expenses = [
+      final result = computeSettlements(
+        ['A', 'B'],
+        [
           Expense.equalSplit(
             id: '1',
             title: 'Lunch',
@@ -173,90 +185,109 @@ void main() {
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
-
-      expect(store.settle(), isEmpty);
-    });
-  });
-
-  group('AppStore history', () {
-    test('adding an expense logs who added it', () {
-      final store = AppStore();
-      store.addExpense(
-        Expense.equalSplit(
-          id: '1',
-          title: 'Lunch',
-          amountPaise: 10000,
-          paidBy: 'A',
-          members: ['A', 'B'],
-          date: DateTime(2026, 9, 20),
-          addedBy: 'Meera',
-        ),
+        ],
       );
-
-      expect(store.activity.length, 1);
-      expect(store.activity.first.by, 'Meera');
-      expect(store.activity.first.verb, 'added');
+      expect(result, isEmpty);
     });
 
-    test('editing records the diff and who edited', () {
-      final store = AppStore();
-      final original = Expense.equalSplit(
-        id: '1',
-        title: 'Lunch',
-        amountPaise: 10000,
-        paidBy: 'A',
-        members: ['A', 'B'],
-        date: DateTime(2026, 9, 20),
-        addedBy: 'A',
-      );
-      store.addExpense(original);
-
-      final edited = Expense.equalSplit(
-        id: '1',
-        title: 'Lunch + extra',
-        amountPaise: 15000,
-        paidBy: 'A',
-        members: ['A', 'B'],
-        date: DateTime(2026, 9, 20),
-        addedBy: 'A',
-      );
-      store.currentUser = 'B';
-      store.replaceExpense(edited);
-
-      final saved = store.expenses.first;
-      expect(saved.changes.length, 3); // title, amount, shares
-      expect(saved.changes.every((c) => c.by == 'B'), isTrue);
-      expect(
-        saved.changes.map((c) => c.change),
-        contains('Title: “Lunch” → “Lunch + extra”'),
-      );
-      expect(store.activity.first.verb, 'edited');
-      expect(store.activity.first.by, 'B');
-    });
-
-    test('deleting an expense leaves an activity record', () {
-      final store = AppStore()
-        ..members = ['A', 'B']
-        ..expenses = [
+    test('partial payments chain across debtors', () {
+      final result = computeSettlements(
+        ['A', 'B', 'C', 'D'],
+        [
           Expense.equalSplit(
             id: '1',
-            title: 'Lunch',
+            title: 'Dinner',
             amountPaise: 10000,
             paidBy: 'A',
-            members: ['A', 'B'],
+            members: ['A', 'B', 'C', 'D'],
             date: DateTime(2026, 9, 20),
             addedBy: 'A',
           ),
-        ];
+          Expense.equalSplit(
+            id: '2',
+            title: 'Coffee',
+            amountPaise: 20000,
+            paidBy: 'B',
+            members: ['A', 'B', 'C', 'D'],
+            date: DateTime(2026, 9, 20),
+            addedBy: 'A',
+          ),
+        ],
+      );
+      // Balances: A +2500, B +12500, C -7500, D -7500.
+      // C pays B 7500; D pays B 5000 then A 2500.
+      expect(result.length, 3);
+      final total = result.fold(0, (s, r) => s + r.amountPaise);
+      expect(total, 15000);
+    });
+  });
 
-      store.currentUser = 'B';
-      store.removeExpense('1');
+  group('diffExpenses', () {
+    Expense base({
+      required String id,
+      required String title,
+      required int amountPaise,
+      String? paidBy,
+      String date = '2026-09-20',
+    }) {
+      return Expense.fromMap({
+        'id': id,
+        'title': title,
+        'amountPaise': amountPaise,
+        'split': paidBy != null,
+        'paidBy': paidBy,
+        'sharesPaise': paidBy == null
+            ? <String, int>{}
+            : {'A': amountPaise ~/ 2, 'B': amountPaise - amountPaise ~/ 2},
+        'date': DateTime.parse(date),
+        'addedBy': 'A',
+        'changes': <Map<String, dynamic>>[],
+      });
+    }
 
-      expect(store.expenses, isEmpty);
-      expect(store.activity.first.verb, 'deleted');
-      expect(store.activity.first.by, 'B');
-      expect(store.activity.first.title, 'Lunch');
+    test('catches title and amount changes', () {
+      final d = diffExpenses(
+        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+        base(id: '1', title: 'Lunch + extra', amountPaise: 15000, paidBy: 'A'),
+      );
+      expect(d, contains('Title: “Lunch” → “Lunch + extra”'));
+      expect(d, contains('Amount: ₹100.00 → ₹150.00'));
+    });
+
+    test('catches paidBy changes', () {
+      final d = diffExpenses(
+        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+        base(id: '1', title: 'Dinner', amountPaise: 10000, paidBy: 'B'),
+      );
+      expect(d, contains('Paid by: A → B'));
+    });
+
+    test('reports no changes for identical expenses', () {
+      expect(diffExpenses(
+        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+        base(id: '1', title: 'Lunch', amountPaise: 10000, paidBy: 'A'),
+      ), isEmpty);
+    });
+  });
+
+  group('money helpers', () {
+    test('toPaise rounds fractional rupees correctly', () {
+      expect(toPaise(100), 10000);
+      expect(toPaise(100.5), 10050);
+      expect(toPaise(0.1), 10);
+      expect(toPaise(0.1 + 0.2), 30);
+    });
+
+    test('fmtPaise formats with symbol and sign', () {
+      expect(fmtPaise(0), '₹0.00');
+      expect(fmtPaise(10000), '₹100.00');
+      expect(fmtPaise(12345), '₹123.45');
+      expect(fmtPaise(-5000), '-₹50.00');
+    });
+
+    test('paiseToInput gives a two-decimal string', () {
+      expect(paiseToInput(12345), '123.45');
+      expect(paiseToInput(5), '0.05');
     });
   });
 }

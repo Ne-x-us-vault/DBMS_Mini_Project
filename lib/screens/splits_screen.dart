@@ -1,8 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../logic/split_logic.dart';
 import '../models/expense.dart';
 import '../store/app_store.dart';
 import '../utils/money.dart';
+import 'admin_panel_screen.dart';
 
 class SplitsScreen extends StatelessWidget {
   const SplitsScreen({super.key, required this.store});
@@ -33,21 +36,9 @@ class _SplitsView extends StatelessWidget {
 
   String _dateLine(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
-  Future<void> _addMember(BuildContext context) async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => const _TextPromptDialog(
-        title: 'Add person',
-        label: 'Name',
-        hint: 'e.g. Priya',
-      ),
-    );
-    if (name != null && name.isNotEmpty) store.addMember(name.trim());
-  }
-
   Future<void> _addExpense(BuildContext context) async {
     if (store.members.isEmpty) {
-      _toast(context, 'Add people first.');
+      _toast(context, 'No users yet. Someone must sign up first.');
       return;
     }
     final e = await showExpenseDialog(context, store: store);
@@ -55,11 +46,13 @@ class _SplitsView extends StatelessWidget {
   }
 
   Future<void> _editExpense(BuildContext context, Expense e) async {
+    if (!store.canEdit(e)) return;
     final edited = await showExpenseDialog(context, store: store, existing: e);
     if (edited != null) store.replaceExpense(edited);
   }
 
   Future<void> _confirmDelete(BuildContext context, Expense e) async {
+    if (!store.canDelete(e)) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -87,7 +80,8 @@ class _SplitsView extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Clear history?'),
-        content: const Text('The activity log will be emptied. Expenses themselves stay untouched.'),
+        content: const Text(
+            'The activity log will be emptied. Expenses themselves stay untouched.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -119,6 +113,7 @@ class _SplitsView extends StatelessWidget {
           ),
           child: _ExpenseDetailSheet(
             expense: e,
+            canEdit: store.canEdit(e),
             dateOf: _dateLine,
             onEdit: () => _editExpense(context, e),
             onDelete: () {
@@ -140,10 +135,10 @@ class _SplitsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final members = store.members;
+    final users = store.users;
     final expenses = store.expenses;
-    final balances = store.balances();
-    final settlements = store.settle();
+    final balances = computeBalances(store.members, expenses);
+    final settlements = computeSettlements(store.members, expenses);
     final totalPaise = expenses.fold(0, (sum, e) => sum + e.amountPaise);
 
     return Scaffold(
@@ -151,34 +146,35 @@ class _SplitsView extends StatelessWidget {
         title: const Text('Shared expenses'),
         actions: [
           PopupMenuButton<String>(
-            tooltip: 'Managing as',
-            icon: const Icon(Icons.person_outline),
-            onSelected: store.setCurrentUser,
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined),
+            onSelected: (v) {
+              switch (v) {
+                case 'admin':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AdminPanelScreen(store: store),
+                    ),
+                  );
+                case 'signout':
+                  FirebaseAuth.instance.signOut();
+              }
+            },
             itemBuilder: (ctx) => [
               PopupMenuItem(
                 enabled: false,
                 child: Text(
-                  members.isEmpty
-                      ? 'Add people first'
-                      : 'Managing as: ${store.currentUser}',
+                  '${store.myName} · ${store.isAdmin ? 'Admin' : 'Member'}',
                   style: theme.textTheme.labelMedium
                       ?.copyWith(color: theme.colorScheme.outline),
                 ),
               ),
-              if (members.isEmpty)
-                const PopupMenuItem(enabled: false, child: Text('—'))
-              else
-                for (final m in members)
-                  PopupMenuItem(
-                    value: m,
-                    child: Row(
-                      children: [
-                        Expanded(child: Text(m)),
-                        if (m == store.currentUser)
-                          Icon(Icons.check, size: 18, color: theme.colorScheme.primary),
-                      ],
-                    ),
-                  ),
+              const PopupMenuItem(
+                value: 'admin',
+                child: Text('Manage users & roles'),
+              ),
+              const PopupMenuItem(value: 'signout', child: Text('Sign out')),
             ],
           ),
         ],
@@ -199,7 +195,7 @@ class _SplitsView extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (expenses.isEmpty)
-            _EmptyCard(text: 'No expenses yet. Anyone can tap + to add one.')
+            _EmptyCard(text: 'No expenses yet. Tap + to add one.')
           else
             for (final e in expenses)
               Card(
@@ -228,16 +224,20 @@ class _SplitsView extends StatelessWidget {
                           fontSize: 16,
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, size: 20),
-                        onSelected: (v) => v == 'delete'
-                            ? _confirmDelete(context, e)
-                            : _editExpense(context, e),
-                        itemBuilder: (ctx) => const [
-                          PopupMenuItem(value: 'edit', child: Text('Edit')),
-                          PopupMenuItem(value: 'delete', child: Text('Delete')),
-                        ],
-                      ),
+                      if (store.canEdit(e))
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert, size: 20),
+                          onSelected: (v) => v == 'delete'
+                              ? _confirmDelete(context, e)
+                              : _editExpense(context, e),
+                          itemBuilder: (ctx) => const [
+                            PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            PopupMenuItem(
+                                value: 'delete', child: Text('Delete')),
+                          ],
+                        )
+                      else
+                        const SizedBox(width: 48),
                     ],
                   ),
                 ),
@@ -259,7 +259,7 @@ class _SplitsView extends StatelessWidget {
                     TextStyle(color: theme.colorScheme.outline, fontSize: 12),
               ),
               children: [
-                if (store.activity.isNotEmpty)
+                if (store.activity.isNotEmpty && store.isAdmin)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Align(
@@ -282,7 +282,7 @@ class _SplitsView extends StatelessWidget {
                 else
                   Column(
                     children: [
-                      for (final a in store.activity.take(30))
+                      for (final a in store.activity)
                         ListTile(
                           dense: true,
                           leading: Icon(
@@ -309,26 +309,29 @@ class _SplitsView extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _SectionHeader(
-            title: 'People (${members.length})',
-            icon: Icons.person_add_alt,
-            tooltip: 'Add person',
-            onTap: () => _addMember(context),
+            title: 'People (${users.length})',
+            icon: null,
+            tooltip: null,
+            onTap: null,
           ),
           const SizedBox(height: 8),
-          if (members.isEmpty)
-            _EmptyCard(text: 'No one yet. Tap + to add people.')
+          if (users.isEmpty)
+            _EmptyCard(text: 'No users yet. Share the app to sign up.')
           else
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final m in members)
+                for (final u in users)
                   Chip(
-                    avatar: CircleAvatar(child: Text(m[0].toUpperCase())),
-                    label: Text(m),
-                    onDeleted: members.length > 1
-                        ? () => store.removeMember(m)
-                        : null,
+                    avatar: CircleAvatar(child: Text(u.name[0].toUpperCase())),
+                    label: Text(
+                      u.isAdmin ? '${u.name} (admin)' : u.name,
+                    ),
+                    onDeleted:
+                        store.isAdmin && u.uid != store.myUid
+                            ? () => _removeUser(context, u)
+                            : null,
                   ),
               ],
             ),
@@ -340,13 +343,13 @@ class _SplitsView extends StatelessWidget {
             onTap: null,
           ),
           const SizedBox(height: 8),
-          if (members.isEmpty)
+          if (users.isEmpty)
             _EmptyCard(text: 'Add people to see balances.')
           else
             Card(
               child: Column(
                 children: [
-                  for (final m in members)
+                  for (final m in store.members)
                     ListTile(
                       dense: true,
                       title: Text(m),
@@ -395,17 +398,43 @@ class _SplitsView extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _removeUser(BuildContext context, dynamic u) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove user?'),
+        content: Text(
+          '${u.name} will no longer be a group member. Their expenses stay in the history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) store.removeUser(u.uid);
+  }
 }
 
 class _ExpenseDetailSheet extends StatelessWidget {
   const _ExpenseDetailSheet({
     required this.expense,
+    required this.canEdit,
     required this.dateOf,
     required this.onEdit,
     required this.onDelete,
   });
 
   final Expense expense;
+  final bool canEdit;
   final String Function(DateTime) dateOf;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -468,28 +497,30 @@ class _ExpenseDetailSheet extends StatelessWidget {
               fontSize: 12,
             ),
           ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Edit'),
+        if (canEdit) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Delete'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                ),
               ),
-            ),
-          ],
-        ),
-        const Divider(height: 8),
+            ],
+          ),
+        ],
+        const Divider(height: 24),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
           title: const Text(
@@ -644,63 +675,6 @@ class _EmptyCard extends StatelessWidget {
   }
 }
 
-class _TextPromptDialog extends StatefulWidget {
-  const _TextPromptDialog({
-    required this.title,
-    required this.label,
-    this.hint,
-  });
-
-  final String title;
-  final String label;
-  final String? hint;
-
-  @override
-  State<_TextPromptDialog> createState() => _TextPromptDialogState();
-}
-
-class _TextPromptDialogState extends State<_TextPromptDialog> {
-  final TextEditingController _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit(BuildContext ctx) {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    Navigator.pop(ctx, text);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: InputDecoration(
-          labelText: widget.label,
-          hintText: widget.hint,
-        ),
-        onSubmitted: (_) => _submit(context),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => _submit(context),
-          child: const Text('OK'),
-        ),
-      ],
-    );
-  }
-}
-
 Future<Expense?> showExpenseDialog(
   BuildContext context, {
   required AppStore store,
@@ -713,8 +687,10 @@ Future<Expense?> showExpenseDialog(
   );
   var date = existing?.date ?? DateTime.now();
   var split = existing?.split ?? true;
-  var paidBy = existing?.paidBy ?? members.first;
-  if (!members.contains(paidBy)) paidBy = members.first;
+  var paidBy = existing?.paidBy ?? (members.isNotEmpty ? members.first : null);
+  if (paidBy == null || !members.contains(paidBy)) {
+    paidBy = members.isNotEmpty ? members.first : null;
+  }
   var mode = existing == null || existing.isEqualSplit ? 0 : 1;
 
   final shareControllers = <String, TextEditingController>{
@@ -737,7 +713,8 @@ Future<Expense?> showExpenseDialog(
         final valid = amountPaise > 0 &&
             titleController.text.trim().isNotEmpty &&
             manualOK &&
-            members.isNotEmpty;
+            members.isNotEmpty &&
+            (!split || paidBy != null);
 
         return AlertDialog(
           title: Text(existing == null ? 'Add expense' : 'Edit expense'),
@@ -793,7 +770,7 @@ Future<Expense?> showExpenseDialog(
                         for (final m in members)
                           DropdownMenuItem(value: m, child: Text(m)),
                       ],
-                      onChanged: (v) => setLocal(() => paidBy = v!),
+                      onChanged: (v) => setLocal(() => paidBy = v),
                     ),
                     const Divider(),
                     SegmentedButton<int>(
@@ -871,7 +848,7 @@ Future<Expense?> showExpenseDialog(
                       final id = existing?.id ??
                           DateTime.now().microsecondsSinceEpoch.toString();
                       final baseTitle = titleController.text.trim();
-                      final addedBy = existing?.addedBy ?? store.currentUser;
+                      final addedBy = existing?.addedBy ?? store.myName;
                       Expense exp;
                       if (!split) {
                         exp = Expense(
@@ -881,14 +858,13 @@ Future<Expense?> showExpenseDialog(
                           split: false,
                           date: date,
                           addedBy: addedBy,
-                          changes: existing?.changes ?? const [],
                         );
                       } else if (mode == 0) {
                         exp = Expense.equalSplit(
                           id: id,
                           title: baseTitle,
                           amountPaise: amountPaise,
-                          paidBy: paidBy,
+                          paidBy: paidBy!,
                           members: members,
                           date: date,
                           addedBy: addedBy,
@@ -908,7 +884,6 @@ Future<Expense?> showExpenseDialog(
                           },
                           date: date,
                           addedBy: addedBy,
-                          changes: existing?.changes ?? const [],
                         );
                       }
                       Navigator.pop(ctx, exp);

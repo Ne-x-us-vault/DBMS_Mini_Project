@@ -4,6 +4,20 @@ class ExpenseChange {
   final String by;
   final String change;
   final DateTime at;
+
+  Map<String, Object?> toMap() => {'by': by, 'change': change, 'at': at};
+
+  factory ExpenseChange.fromMap(Map<String, dynamic> map) => ExpenseChange(
+        by: map['by'] as String? ?? '',
+        change: map['change'] as String? ?? '',
+        at: _toDateTime(map['at']),
+      );
+}
+
+DateTime _toDateTime(Object? v) {
+  if (v is DateTime) return v;
+  if (v is String) return DateTime.parse(v).toLocal();
+  return DateTime.fromMillisecondsSinceEpoch(0);
 }
 
 class Expense {
@@ -16,6 +30,7 @@ class Expense {
     this.sharesPaise = const {},
     required this.date,
     required this.addedBy,
+    this.ownerId = '',
     this.changes = const [],
   });
 
@@ -27,6 +42,7 @@ class Expense {
     required List<String> members,
     required DateTime date,
     required String addedBy,
+    String ownerId = '',
   }) {
     final n = members.length;
     final share = n == 0 ? amountPaise : amountPaise ~/ n;
@@ -44,6 +60,7 @@ class Expense {
       sharesPaise: shares,
       date: date,
       addedBy: addedBy,
+      ownerId: ownerId,
     );
   }
 
@@ -55,6 +72,9 @@ class Expense {
   final Map<String, int> sharesPaise;
   final DateTime date;
   final String addedBy;
+
+  /// Firebase Auth uid of the user who created this expense.
+  final String ownerId;
   final List<ExpenseChange> changes;
 
   bool get isEqualSplit {
@@ -70,40 +90,35 @@ class Expense {
     return max - min <= amountPaise % n;
   }
 
-  Map<String, Object?> toJson() => {
+  Map<String, Object?> toMap() => {
         'id': id,
         'title': title,
         'amountPaise': amountPaise,
         'split': split,
         'paidBy': paidBy,
         'sharesPaise': sharesPaise,
-        'date': date.toIso8601String(),
+        'date': date,
         'addedBy': addedBy,
-        'changes': [
-          for (final c in changes)
-            {'by': c.by, 'change': c.change, 'at': c.at.toIso8601String()},
-        ],
+        'ownerId': ownerId,
+        'changes': [for (final c in changes) c.toMap()],
       };
 
-  factory Expense.fromJson(Map<String, Object?> json) {
+  factory Expense.fromMap(Map<String, dynamic> map) {
     final shares =
-        (json['sharesPaise'] as Map?)?.cast<String, int>() ?? const {};
+        (map['sharesPaise'] as Map?)?.cast<String, int>() ?? const {};
     return Expense(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      amountPaise: json['amountPaise'] as int,
-      split: json['split'] as bool? ?? shares.isNotEmpty,
-      paidBy: json['paidBy'] as String?,
+      id: map['id'] as String,
+      title: map['title'] as String? ?? '',
+      amountPaise: (map['amountPaise'] as num?)?.toInt() ?? 0,
+      split: map['split'] as bool? ?? shares.isNotEmpty,
+      paidBy: map['paidBy'] as String?,
       sharesPaise: shares,
-      date: DateTime.parse(json['date'] as String),
-      addedBy: json['addedBy'] as String? ?? '',
+      date: _toDateTime(map['date']),
+      addedBy: map['addedBy'] as String? ?? '',
+      ownerId: map['ownerId'] as String? ?? '',
       changes: [
-        for (final c in (json['changes'] as List?) ?? const [])
-          ExpenseChange(
-            by: (c as Map)['by'] as String,
-            change: c['change'] as String,
-            at: DateTime.parse(c['at'] as String),
-          ),
+        for (final c in (map['changes'] as List?) ?? const [])
+          ExpenseChange.fromMap((c as Map).cast<String, dynamic>()),
       ],
     );
   }

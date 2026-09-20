@@ -1,106 +1,85 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-class Message {
-  const Message(this.text, {this.isMine = false});
+import '../store/app_store.dart';
 
-  final String text;
-  final bool isMine;
-}
+class ChatScreen extends StatelessWidget {
+  const ChatScreen({super.key, required this.store});
 
-class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final AppStore store;
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => _ChatView(store: store),
+    );
+  }
 }
 
-class _ChatScreenState extends State<ChatScreen> {
-  static const _key = 'split_chat_messages';
+class _ChatView extends StatefulWidget {
+  const _ChatView({required this.store});
 
-  List<Message> _messages = [];
+  final AppStore store;
+
+  @override
+  State<_ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends State<_ChatView> {
   final TextEditingController _controller = TextEditingController();
 
   @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      final raw = prefs.getString(_key);
-      if (prefs.containsKey(_key) && raw != null) {
-        final list = jsonDecode(raw) as List;
-        setState(() {
-          _messages = [
-            for (final m in list)
-              Message(
-                (m as Map)['text'] as String,
-                isMine: m['mine'] as bool? ?? false,
-              ),
-          ];
-        });
-      } else {
-        setState(() {
-          _messages = const [
-            Message('Hey! Lunch tomorrow?'),
-            Message('Sure, count me in.'),
-            Message('We can split the bill later in the Splits tab.'),
-          ];
-        });
-      }
-      _save(prefs);
-    });
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   void _send() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    setState(() => _messages.add(Message(text, isMine: true)));
+    widget.store.sendMessage(text);
     _controller.clear();
     FocusScope.of(context).unfocus();
-    SharedPreferences.getInstance().then(_save);
-  }
-
-  Future<void> _save(SharedPreferences prefs) async {
-    await prefs.setString(
-      _key,
-      jsonEncode([
-        for (final m in _messages) {'text': m.text, 'mine': m.isMine},
-      ]),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final messages = widget.store.messages;
     return Scaffold(
       appBar: AppBar(title: const Text('Chat')),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
+      body: messages.isEmpty
+          ? Center(
+              child: Text(
+                'No messages yet. Say hi!',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
+            )
+          : ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) => _Bubble(message: _messages[i]),
+              itemCount: messages.length,
+              itemBuilder: (context, i) => _Bubble(
+                message: messages[i],
+                isMine: messages[i].byUid == widget.store.myUid,
+              ),
             ),
-          ),
-          _InputBar(controller: _controller, onSend: _send),
-        ],
-      ),
+      bottomNavigationBar: _InputBar(controller: _controller, onSend: _send),
     );
   }
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message});
+  const _Bubble({required this.message, required this.isMine});
 
-  final Message message;
+  final dynamic message;
+  final bool isMine;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final mine = message.isMine;
     return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -108,21 +87,41 @@ class _Bubble extends StatelessWidget {
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
         decoration: BoxDecoration(
-          color: mine
+          color: isMine
               ? theme.colorScheme.primary
               : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(mine ? 16 : 4),
-            bottomRight: Radius.circular(mine ? 4 : 16),
+            bottomLeft: Radius.circular(isMine ? 16 : 4),
+            bottomRight: Radius.circular(isMine ? 4 : 16),
           ),
         ),
-        child: Text(
-          message.text,
-          style: TextStyle(
-            color: mine ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isMine)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  message.by,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            Text(
+              message.text,
+              style: TextStyle(
+                color: isMine
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurface,
+              ),
+            ),
+          ],
         ),
       ),
     );
