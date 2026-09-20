@@ -1,8 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../models/expense.dart';
 import '../store/app_store.dart';
+import '../theme/app_theme.dart';
 import '../utils/money.dart';
 
 class SplitsScreen extends StatelessWidget {
@@ -263,9 +267,24 @@ class _SplitsView extends StatelessWidget {
             onTap: () => _addExpense(context),
           ),
           const SizedBox(height: 4),
-          Text(
-            'Total tracked: ${fmtPaise(totalPaise)}',
-            style: TextStyle(color: theme.colorScheme.outline, fontSize: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                'Total tracked',
+                style: GoogleFonts.manrope(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.trending_up_rounded,
+                  size: 14, color: AppPalette.gold),
+              const Spacer(),
+              MoneyText(fmtPaise(totalPaise), size: 18, color: AppPalette.gold),
+            ],
           ),
           const SizedBox(height: 8),
           if (expenses.isEmpty)
@@ -275,29 +294,53 @@ class _SplitsView extends StatelessWidget {
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: Icon(
-                    e.split ? Icons.receipt_long : Icons.receipt,
-                    color: e.split
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.outline,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  title: Text(e.title),
-                  subtitle: Text(
-                    e.split
-                        ? '${e.paidBy ?? '?'} paid · ${_shortDate(e.date)}'
-                        : 'Tracking only · ${_shortDate(e.date)}',
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  leading: Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: e.split
+                          ? AppPalette.mint
+                          : theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      e.split ? Icons.receipt_long : Icons.receipt,
+                      size: 20,
+                      color: e.split ? AppPalette.forest : AppPalette.muted,
+                    ),
+                  ),
+                  title: Text(
+                    e.title,
+                    style: GoogleFonts.manrope(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppPalette.ink,
+                    ),
+                  ),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      e.split
+                          ? '${e.paidBy ?? '?'} paid · ${_shortDate(e.date)}'
+                          : 'Tracking only · ${_shortDate(e.date)}',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12.5,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                   onTap: () => _openDetail(context, e),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        fmtPaise(e.amountPaise),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                      MoneyText(fmtPaise(e.amountPaise),
+                          size: 16, color: AppPalette.gold),
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert, size: 20),
                         onSelected: (v) => v == 'delete'
@@ -418,18 +461,14 @@ class _SplitsView extends StatelessWidget {
                   for (final m in members)
                     ListTile(
                       dense: true,
-                      title: Text(m),
-                      trailing: Text(
-                        fmtPaise(balances[m] ?? 0),
-                        style: TextStyle(
+                      title: Text(
+                        m,
+                        style: GoogleFonts.manrope(
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: (balances[m] ?? 0) > 0
-                              ? Colors.green
-                              : (balances[m] ?? 0) < 0
-                                  ? Colors.red
-                                  : theme.colorScheme.outline,
                         ),
                       ),
+                      trailing: _BalanceChip(paise: balances[m] ?? 0),
                     ),
                 ],
               ),
@@ -450,11 +489,31 @@ class _SplitsView extends StatelessWidget {
                 children: [
                   for (final s in settlements)
                     ListTile(
-                      leading: const Icon(Icons.currency_rupee),
-                      title: Text('${s.from} pays ${s.to}'),
-                      trailing: Text(
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppPalette.goldSoft,
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: const Icon(
+                          Icons.currency_rupee,
+                          size: 19,
+                          color: AppPalette.gold,
+                        ),
+                      ),
+                      title: Text(
+                        '${s.from} pays ${s.to}',
+                        style: GoogleFonts.manrope(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      trailing: MoneyText(
                         fmtPaise(s.amountPaise),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        size: 15,
+                        color: AppPalette.gold,
                       ),
                     ),
                 ],
@@ -603,13 +662,20 @@ class _ExpenseDetailSheet extends StatelessWidget {
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(e.title, style: theme.textTheme.titleLarge),
-            Text(
-              fmtPaise(e.amountPaise),
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+            Expanded(
+              child: Text(
+                e.title,
+                style: GoogleFonts.manrope(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppPalette.ink,
+                ),
+              ),
             ),
+            const SizedBox(width: 12),
+            MoneyText(fmtPaise(e.amountPaise), size: 22, color: AppPalette.gold),
           ],
         ),
         const SizedBox(height: 12),
@@ -745,6 +811,49 @@ class _HistoryLine extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _BalanceChip extends StatelessWidget {
+  const _BalanceChip({required this.paise});
+
+  final int paise;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg;
+    final Color fg;
+    final String text;
+    if (paise > 0) {
+      bg = AppPalette.mint;
+      fg = AppPalette.good;
+      text = '+${fmtPaise(paise)}';
+    } else if (paise < 0) {
+      bg = const Color(0xFFF7DAD8);
+      fg = AppPalette.bad;
+      text = fmtPaise(paise);
+    } else {
+      bg = AppPalette.goldSoft;
+      fg = AppPalette.muted;
+      text = 'settled';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: paise == 0
+          ? Text(
+              text,
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: fg,
+              ),
+            )
+          : MoneyText(text, size: 13.5, color: fg),
     );
   }
 }
@@ -1003,8 +1112,13 @@ Future<Expense?> showExpenseDialog(
             FilledButton(
               onPressed: valid
                   ? () {
+                      // Timestamp + random suffix keeps the client-generated
+                      // ID unique even when two phones save in the same
+                      // microsecond (a plain timestamp would collide and the
+                      // second batch.set would silently overwrite the first).
                       final id = existing?.id ??
-                          DateTime.now().microsecondsSinceEpoch.toString();
+                          '${DateTime.now().microsecondsSinceEpoch}-'
+                          '${Random().nextInt(1 << 31)}';
                       final baseTitle = titleController.text.trim();
                       final addedBy = existing?.addedBy ?? store.managingAs;
                       Expense exp;

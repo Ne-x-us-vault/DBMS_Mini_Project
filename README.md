@@ -114,6 +114,14 @@ end-to-end to avoid float drift; the edit `changes[]` map is the audit trail.
   - `replaceExpense` appends edit history with `FieldValue.arrayUnion` so concurrent edits on different phones don't overwrite `changes`.
 - **Money** is integer paise end-to-end (`toPaise`/`fmtPaise`/`paiseToInput`); no floats.
 - **Permissions**: anyone in the group edits/deletes anything; identity is the chosen "Managing as" name for history/chat. Real validation lives in `firestore.rules`: signed-in only (`request.auth != null`), account documents only owned by `request.auth.uid`, `amountPaise` is int > 0, `text` non-empty.
+- **Uniqueness & integrity** (DBMS constraints in a NoSQL store):
+  - *E-mail* is unique natively — Firebase Auth enforces it (`email-already-in-use` is surfaced in the UI).
+  - *Username* is unique via `usernames/{name}` — an index keyed by the normalized (trimmed, whitespace-collapsed, lower-cased) name storing the owning `uid`. The security rules only allow **create** (a second write to the same id is an *update*, which is denied), so the create-if-absent write is the atomic `UNIQUE` index; a taken name surfaces as `UsernameTakenException` and the half-created auth account is deleted. Renaming (`updateProfile`) frees the old key and claims the new one in one batch.
+  - *Group / message / activity ids* are Firestore auto-IDs (collision-proof); *expense ids* are `timestamp-<random>` so two phones saving in the same microsecond can't overwrite each other.
+  - *Referential integrity in rules*: every write under `groups/{groupId}` requires the caller to hold `users/{uid}/groups/{groupId}` **before or after the same batch** (`exists(...) || getAfter(...).exists()`), which keeps the atomic `createGroup`/`joinGroup`/`leaveGroup` batches valid while blocking outside writes. Group *reads* stay open so a code-only user can preview a group before joining.
+  - Members within a group are unique case-insensitively (`"John"` and `"john"` are the same person).
+  - *Known limitation*: attribution (expenses' `paidBy`, chat sender, group members) is by display name string, so renaming an account re-labels only future entries.
+- **Design system** (`lib/theme/app_theme.dart`): a single Material 3 theme drives the premium look — deep-forest green primary with a muted gold reserved for rupee figures (serif italic Fraunces) against a cool mist background with Manrope type. The debug banner is disabled (`debugShowCheckedModeBanner: false`).
 
 ## Setup
 
@@ -123,4 +131,4 @@ end-to-end to avoid float drift; the edit `changes[]` map is the audit trail.
 
 ## Testing
 
-Pure-logic groups (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` groups (stream load, add/replace/remove expense with stamped history + activity, removeMember batch, chat senderName/ordering), membership tests (`myGroups`, `joinGroup` dedupe, `leaveGroup` strips shares, unknown-code throws) and aggregate-query tests (`expenseCount`, `expenseCountBetween`, `totalTrackedPaise`, `perMemberPaid`). `flutter analyze` clean, `flutter test` 32/32.
+Pure-logic groups (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` groups (stream load, add/replace/remove expense with stamped history + activity, removeMember batch, chat senderName/ordering), membership tests (`myGroups`, `joinGroup` dedupe, `leaveGroup` strips shares, unknown-code throws) and aggregate-query tests (`expenseCount`, `expenseCountBetween`, `totalTrackedPaise`, `perMemberPaid`) plus `normalizeUsername`/`UsernameTakenException` and case-insensitive member dedupe. `flutter analyze` clean, `flutter test` 38/38.

@@ -13,6 +13,26 @@ class AuthUser {
   final DateTime? createdAt;
 }
 
+/// The chosen username is already registered under a different account.
+/// (Firebase's own `email-already-in-use` covers e-mail; this covers the
+/// `usernames/{name}` uniqueness index.)
+class UsernameTakenException implements Exception {
+  const UsernameTakenException({required this.name});
+
+  final String name;
+
+  @override
+  String toString() => 'The username “$name” is already taken.';
+}
+
+/// The canonical key stored in the `usernames` uniqueness index:
+/// trimmed, whitespace-collapsed and lower-cased, so "Jaswa", "jaswa " and
+/// "J  aswa" are all rejected as the same name.
+String normalizeUsername(String name) {
+  final collapsed = name.trim().replaceAll(RegExp(r'\s+'), ' ');
+  return collapsed.toLowerCase();
+}
+
 /// Abstraction over authentication and the account document.
 ///
 /// The production implementation uses Firebase Email/Password auth and keeps

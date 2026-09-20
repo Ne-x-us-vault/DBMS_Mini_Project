@@ -505,6 +505,21 @@ void main() {
       );
     });
 
+    test('addMember is unique case-insensitively', () async {
+      await repo.createGroup(name: 'Roommates', member: 'Aarav');
+      final store = makeStore(repo, 'Aarav');
+      await pump();
+      await store.addMember('MEERA');
+      await pump();
+      expect(repo.group!.members, contains('MEERA'));
+      await store.addMember('Meera');
+      await pump();
+      expect(
+        repo.group!.members.where((m) => m.toLowerCase() == 'meera').length,
+        1,
+      );
+    });
+
     test('leaveGroup removes the membership and strips the shares', () async {
       final g = await repo.createGroup(name: 'Roommates', member: 'Aarav');
       await repo.joinGroup(g.id, name: 'Zara');

@@ -74,7 +74,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addMember(String name) async {
     final n = name.trim();
-    if (n.isEmpty || members.contains(n)) return;
+    if (n.isEmpty) return;
+    // Members are unique case-insensitively ("John" and "john" are the same
+    // person), mirroring the global username uniqueness rule.
+    final lower = n.toLowerCase();
+    if (members.any((m) => m.toLowerCase() == lower)) return;
     await _repository.setMembers(groupId, [...members, n]);
   }
 

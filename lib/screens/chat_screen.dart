@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../models/models.dart';
 import '../store/app_store.dart';
+import '../theme/app_theme.dart';
 
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key, required this.store});
@@ -50,11 +52,46 @@ class _ChatViewState extends State<_ChatView> {
       appBar: AppBar(title: const Text('Chat')),
       body: messages.isEmpty
           ? Center(
-              child: Text(
-                'No messages yet. Say hi!',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppPalette.mint,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(
+                      Icons.chat_bubble_outline,
+                      size: 30,
+                      color: AppPalette.forest,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      'No messages yet. Say hi!',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.fraunces(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        fontStyle: FontStyle.italic,
+                        color: AppPalette.ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Messages sync with everyone in the group.',
+                    style: GoogleFonts.manrope(
+                      fontSize: 12.5,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             )
           : ListView.builder(
@@ -81,49 +118,97 @@ class _Bubble extends StatelessWidget {
     final theme = Theme.of(context);
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isMine
-              ? theme.colorScheme.primary
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isMine ? 16 : 4),
-            bottomRight: Radius.circular(isMine ? 4 : 16),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isMine)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: Text(
-                  message.senderName,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.primary,
-                  ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMine) ...[
+            Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: AppPalette.goldSoft,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                message.senderName.isEmpty
+                    ? '?'
+                    : message.senderName[0].toUpperCase(),
+                style: GoogleFonts.manrope(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppPalette.gold,
                 ),
               ),
-            Text(
-              message.text,
-              style: TextStyle(
-                color: isMine
-                    ? theme.colorScheme.onPrimary
-                    : theme.colorScheme.onSurface,
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.68,
+              ),
+              decoration: BoxDecoration(
+                color: isMine ? null : AppPalette.card,
+                gradient: isMine
+                    ? const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [AppPalette.forest, AppPalette.moss],
+                      )
+                    : null,
+                border: isMine
+                    ? null
+                    : Border.all(color: AppPalette.hairline, width: 1),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(18),
+                  topRight: const Radius.circular(18),
+                  bottomLeft: Radius.circular(isMine ? 18 : 5),
+                  bottomRight: Radius.circular(isMine ? 5 : 18),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppPalette.ink.withValues(alpha: isMine ? 0.18 : 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isMine)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        message.senderName,
+                        style: GoogleFonts.manrope(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppPalette.good,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    message.text,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14.5,
+                      height: 1.35,
+                      color: isMine
+                          ? Colors.white
+                          : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -147,12 +232,20 @@ class _InputBar extends StatelessWidget {
                 controller: controller,
                 decoration: const InputDecoration(
                   hintText: 'Type a message...',
+                  filled: true,
+                  fillColor: Color(0xFFEDF1EC),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 11,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(24)),
+                    borderSide: BorderSide.none,
                   ),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(24)),
+                    borderSide:
+                        BorderSide(color: AppPalette.forest, width: 1.4),
                   ),
                 ),
                 onSubmitted: (_) => onSend(),
@@ -161,6 +254,14 @@ class _InputBar extends StatelessWidget {
             const SizedBox(width: 8),
             IconButton.filled(
               onPressed: onSend,
+              style: IconButton.styleFrom(
+                backgroundColor: AppPalette.gold,
+                foregroundColor: AppPalette.forestDeep,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                minimumSize: const Size(48, 48),
+              ),
               icon: const Icon(Icons.send),
             ),
           ],

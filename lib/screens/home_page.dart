@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../models/models.dart';
 import '../services/auth_repository.dart';
 import '../services/group_repository.dart';
 import '../services/local_session.dart';
+import '../theme/app_theme.dart';
+import '../widgets/group_avatar.dart';
 import 'group_detail_screen.dart';
 import 'group_screen.dart';
 import 'profile_screen.dart';
@@ -333,22 +336,55 @@ class _EmptyHome extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.groups, size: 56, color: theme.colorScheme.primary),
-              const SizedBox(height: 12),
-              Text(
-                'Start sharing expenses',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
+              Container(
+                width: 96,
+                height: 96,
+                margin: const EdgeInsets.only(bottom: 20),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppPalette.forest, AppPalette.moss],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x221B4332),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.groups,
+                  size: 44,
+                  color: AppPalette.goldSoft,
+                ),
               ),
-              const SizedBox(height: 4),
               Text(
-                'Create a group and its code for friends, or join one with a '
-                'code you received. Groups you join show up here.',
+                'Start sharing\nexpenses',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: theme.colorScheme.outline),
+                style: GoogleFonts.fraunces(
+                  fontSize: 30,
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
+                  fontStyle: FontStyle.italic,
+                  color: AppPalette.ink,
+                ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 10),
+              Text(
+                'Create a group and share its code with friends, or join one '
+                'with a code you received. Groups you join show up here.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(
+                  fontSize: 14,
+                  height: 1.55,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 28),
               FilledButton.icon(
                 onPressed: busy ? null : onCreate,
                 icon: const Icon(Icons.add_box_outlined),
@@ -389,20 +425,49 @@ class _GroupList extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 96),
         itemCount: groups.length,
         itemBuilder: (context, i) {
+          final theme = Theme.of(context);
           final g = groups[i];
           return Card(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: ListTile(
-              leading: CircleAvatar(
-                child: Text(
-                  g.name.isEmpty ? '?' : g.name[0].toUpperCase(),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              leading: GroupAvatar(name: g.name, size: 46),
+              title: Text(
+                g.name,
+                style: GoogleFonts.manrope(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppPalette.ink,
                 ),
               ),
-              title: Text(g.name),
-              subtitle: Text(
-                '${g.members.length} member${g.members.length == 1 ? '' : 's'}',
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '${g.members.length} member${g.members.length == 1 ? '' : 's'}',
+                  style: GoogleFonts.manrope(
+                    fontSize: 12.5,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppPalette.mint,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: AppPalette.forest,
+                ),
+              ),
               onTap: busy ? null : () => onOpen(g),
             ),
           );

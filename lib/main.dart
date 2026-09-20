@@ -10,6 +10,7 @@ import 'services/firebase_auth_repository.dart';
 import 'services/firestore_repository.dart';
 import 'services/group_repository.dart';
 import 'services/local_session.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,9 +24,8 @@ class SplitChatApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Split Chat',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: buildAppTheme(),
       home: const FirebaseBootstrap(),
     );
   }

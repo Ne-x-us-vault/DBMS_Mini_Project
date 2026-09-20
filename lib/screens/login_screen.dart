@@ -1,7 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../services/auth_repository.dart';
+import '../theme/app_theme.dart';
 
 /// Email + password login/register screen.
 ///
@@ -35,6 +37,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String _friendly(Object e) {
+    if (e is UsernameTakenException) {
+      return 'That name is already taken. Try another one.';
+    }
     if (e is FirebaseAuthException) {
       switch (e.code) {
         case 'invalid-email':
@@ -99,7 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -111,95 +115,195 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.groups,
-                      size: 56, color: theme.colorScheme.primary),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Split Chat',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _registering
-                        ? 'Create an account with your email. Groups and '
-                            'expenses are stored in the cloud.'
-                        : 'Log in to see your expense groups. '
-                            'Groups you join appear on Home.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: theme.colorScheme.outline),
-                  ),
-                  const SizedBox(height: 32),
-                  if (_registering) ...[
-                    TextField(
-                      controller: _name,
-                      enabled: !_busy,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
-                        labelText: 'Your name',
-                        hintText: 'e.g. Jaswa',
-                        border: OutlineInputBorder(),
+                  _Hero(registering: _registering),
+                  const SizedBox(height: 16),
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_registering) ...[
+                            TextField(
+                              controller: _name,
+                              enabled: !_busy,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: const InputDecoration(
+                                labelText: 'Your name',
+                                hintText: 'e.g. Jaswa',
+                                prefixIcon:
+                                    Icon(Icons.badge_outlined, size: 20),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          TextField(
+                            controller: _email,
+                            enabled: !_busy,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.mail_outline, size: 20),
+                            ),
+                            onSubmitted: (_) => _submit(),
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: _password,
+                            enabled: !_busy,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: Icon(Icons.lock_outline, size: 20),
+                            ),
+                            onSubmitted: (_) => _submit(),
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _busy ? null : _submit,
+                              child: _busy
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      _registering
+                                          ? 'Create account'
+                                          : 'Log in',
+                                    ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => setState(() {
+                                      _registering = !_registering;
+                                      _error = null;
+                                    }),
+                            child: Text(_registering
+                                ? 'Have an account? Log in'
+                                : 'New here? Create an account'),
+                          ),
+                          if (_error != null) _ErrorBanner(message: _error!),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  TextField(
-                    controller: _email,
-                    enabled: !_busy,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _submit(),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _password,
-                    enabled: !_busy,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: _busy ? null : _submit,
-                    child: _busy
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(_registering ? 'Create account' : 'Log in'),
-                  ),
-                  TextButton(
-                    onPressed:
-                        _busy ? null : () => setState(() {
-                              _registering = !_registering;
-                              _error = null;
-                            }),
-                    child: Text(_registering
-                        ? 'Have an account? Log in'
-                        : 'New here? Create an account'),
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                  ],
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _Hero extends StatelessWidget {
+  const _Hero({required this.registering});
+
+  final bool registering;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppPalette.forest, AppPalette.forestDeep],
+        ),
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x331B4332),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SPLIT CHAT',
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              letterSpacing: 3.4,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFFE4C776),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Settle up, ${registering ? 'together.' : 'simply.'}',
+            style: GoogleFonts.fraunces(
+              fontSize: 30,
+              height: 1.08,
+              fontWeight: FontWeight.w600,
+              fontStyle: FontStyle.italic,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            registering
+                ? 'Create an account with your email. Groups and expenses are '
+                    'stored in the cloud, safe and shared.'
+                : 'Log in to see your expense groups. Everything you track is '
+                    'stored securely in the cloud.',
+            style: GoogleFonts.manrope(
+              fontSize: 13.5,
+              height: 1.5,
+              color: Colors.white.withValues(alpha: 0.78),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppPalette.bad.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline,
+              size: 18, color: AppPalette.bad),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.manrope(
+                fontSize: 13,
+                height: 1.4,
+                color: AppPalette.bad,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

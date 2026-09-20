@@ -129,7 +129,7 @@ class FirestoreGroupRepository implements GroupRepository {
     return GroupInfo(id: ref.id, name: name, members: [member]);
   }
 
-@override
+  @override
   Stream<List<GroupInfo>> myGroups() {
     return _memberships().snapshots().asyncMap((snap) async {
       final groups = <GroupInfo>[];

@@ -18,23 +18,57 @@ service cloud.firestore {
         && request.resource.data.text.size() > 0;
     }
 
+    // Applies to every write under /groups/{groupId}. A user may write a
+    // group only if they hold a membership row (users/{uid}/groups/{groupId})
+    // — before OR after this same batch:
+    //   * exists()          → the pre-batch state (covers continuous members,
+    //                         including the batch that deletes their membership
+    //                         in leaveGroup)...
+    //   * getAfter(...).exists() → the post-batch state (covers createGroup and
+    //                         joinGroup, where the membership row is written in
+    //                         the SAME batch as the group write).
+    //
+    // Rules functions cannot see the outer `match` wildcard, so `groupId` is
+    // passed in as a parameter by every caller.
+    function isMemberOrJoining(groupId) {
+      return signedIn()
+        && (exists(/databases/$(database)/documents/users/$(request.auth.uid)/groups/$(groupId))
+            || getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/groups/$(groupId)).data != null);
+    }
+
+    // Global identity. Usernames are unique because document IDs are the
+    // normalized (lower-cased) name and the only allowed operation is
+    // CREATE — Firestore turns a second write to the same ID into an UPDATE,
+    // which is denied. That atomic create-if-absent *is* the UNIQUE index.
+    match /usernames/{name} {
+      // Public read (a doc holds just a `{uid}` and the id is the normalized
+      // name): register() pre-checks the name before a Firebase account or a
+      // session exists, so reads can't be gated on being signed in.
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
     match /groups/{groupId} {
-      allow read, write: if signedIn();
+      allow read: if signedIn();
+      allow write: if isMemberOrJoining(groupId);
 
       match /expenses/{expenseId} {
         allow read: if signedIn();
-        allow create, update: if signedIn() && validExpense();
-        allow delete: if signedIn();
+        allow create, update: if isMemberOrJoining(groupId) && validExpense();
+        allow delete: if isMemberOrJoining(groupId);
       }
 
       match /activity/{activityId} {
-        allow read, write: if signedIn();
+        allow read: if signedIn();
+        allow write: if isMemberOrJoining(groupId);
       }
 
       match /messages/{messageId} {
         allow read: if signedIn();
-        allow create, update: if signedIn() && validMessage();
-        allow delete: if signedIn();
+        allow create, update: if isMemberOrJoining(groupId) && validMessage();
+        allow delete: if isMemberOrJoining(groupId);
       }
     }
 

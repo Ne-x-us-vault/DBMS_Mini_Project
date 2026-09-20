@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/group_repository.dart';
 import '../services/local_session.dart';
 import '../store/app_store.dart';
+import '../widgets/group_avatar.dart';
 import 'chat_screen.dart';
 import 'splits_screen.dart';
 
@@ -110,7 +111,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               icon: const Icon(Icons.arrow_back),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            title: Text(_store.groupName),
+            title: Row(
+              children: [
+                GroupAvatar(name: _store.groupName, size: 30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _store.groupName,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
             actions: [
               IconButton(
                 tooltip: 'Leave group',
