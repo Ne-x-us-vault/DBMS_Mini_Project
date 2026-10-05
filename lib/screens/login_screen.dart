@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../services/auth_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/premium_card.dart';
 
 /// Email + password login/register screen.
 ///

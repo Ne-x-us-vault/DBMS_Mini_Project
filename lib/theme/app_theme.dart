@@ -117,7 +117,7 @@ ThemeData buildAppTheme() {
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: AppPalette.hairline, width: 1),
+        side: const BorderSide(color: AppPalette.hairline, width: 0.5),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(

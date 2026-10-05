@@ -7,6 +7,7 @@ import '../services/group_repository.dart';
 import '../services/local_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/group_avatar.dart';
+import '../widgets/premium_card.dart';
 import 'group_detail_screen.dart';
 import 'group_screen.dart';
 import 'profile_screen.dart';
@@ -427,8 +428,7 @@ class _GroupList extends StatelessWidget {
         itemBuilder: (context, i) {
           final theme = Theme.of(context);
           final g = groups[i];
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          return PremiumCard(
             child: ListTile(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
