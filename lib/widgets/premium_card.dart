@@ -24,7 +24,7 @@ class PremiumCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor ?? AppPalette.card,
         borderRadius: BorderRadius.circular(20),
-        border: const BorderSide(color: AppPalette.hairline, width: 1),
+        border: Border.all(color: AppPalette.hairline, width: 1),
         boxShadow: [
           BoxShadow(
             color: AppPalette.ink.withValues(alpha: 0.05),
@@ -34,7 +34,7 @@ class PremiumCard extends StatelessWidget {
         ],
       ),
       child: Padding(
-        padding: padding,
+        padding: padding ?? EdgeInsets.zero,
         child: child,
       ),
     );
