@@ -5,21 +5,21 @@
 ## How it works in simple words
 
 - Several phones share **groups** of expenses. Everything a group does (expenses, edits, history, chat) is stored in the cloud (Firestore) and stays in sync on every phone in real time.
-- You **create an account with email + password** (register/login on the login screen) and can **log out**. Your account profile lives in `users/{uid}` (`displayName`, `email`, `createdAt`).
+- You **create an account with email + password** (register/login on the login screen — registration also picks a **display name that must be globally unique**, enforced by the `usernames/{name}` index) and can **log out**. Your account profile lives in `users/{uid}` (`displayName`, `email`, `createdAt`).
 - After login you land on **Home** (My groups). If you have no groups yet it shows **Create group** / **Join group** buttons; once you have groups they are **listed on Home** and the create action becomes a **floating + button in the bottom-right corner**.
 - The **group code is the Firestore document id** — shown inside a group with a copy button. Send it to friends on other phones and they join the same group (from Home → floating + → Join group).
 - Joining a group records a **membership** for your account (`users/{uid}/groups/{groupId}`) and you pick which **member name to act as** ("Managing as") — an existing member, or your own new name. That name is stamped on the expenses, history and chat messages you create.
 - The **only thing kept on your phone** is the display name, the group currently open and your "Managing as" name via `shared_preferences`. Everything else is the cloud source of truth, so your groups appear after any login on any device.
 - **Account** (top-right on Home) shows your identity and per-group stats — expense count and total tracked come from **server-side Firestore `COUNT`/`SUM` aggregate queries**, and per-member totals from a `GROUP BY paidBy SUM(amountPaise)` style query.
 - Expenses, edits and deletions are each **one atomic write** together with their history entry, so the expense and its activity record always stay consistent even when people edit on different phones at the same time.
-- Each phone shows "Managing as" next to messages it sent and its own member chip marked **(you)**, but every phone sees the same, live, up-to-date data.
+- Each phone's **"Managing as"** name is shown in the group header and on the member chip marked **(you)**; chat bubbles you sent are matched by that name and styled as your own. Every phone sees the same, live, up-to-date data.
 
 ## Quick reference
 
 | Layer        | Choice                                                        |
 |--------------|---------------------------------------------------------------|
 | Language     | Dart (`^3.13.2`), Flutter 3.47.x                              |
-| UI           | Material 3 (`ColorScheme.fromSeed`, teal)                    |
+| UI           | Material 3 (`buildAppTheme()`, forest green, Manrope/Fraunces)   |
 | Auth         | Firebase **Email + Password** Auth (`AuthRepository`)         |
 | Backend      | Firebase Cloud Firestore (real-time NoSQL)                   |
 | On-device    | `shared_preferences` (display name, open group, managing-as) |
@@ -29,7 +29,7 @@
 | Linting      | `flutter_lints ^6.0.0`                                       |
 | Tests        | `flutter_test` — pure logic + store-vs-fake-repository        |
 
-Commands: `flutter run` / `flutter analyze` / `flutter test` (currently 32/32 pass).
+Commands: `flutter run` / `flutter analyze` / `flutter test` (currently 38/38 pass).
 
 ## Structure
 
@@ -44,28 +44,34 @@ lib/
 │   └── split_logic.dart          # computeBalances, computeSettlements, diffExpenses, stripMemberFromShares
 ├── utils/money.dart              # paise math + formatting
 ├── services/
-│   ├── auth_repository.dart      # abstract auth + AuthUser (email/name/uid)
-│   ├── firebase_auth_repository.dart # Email+Password auth + users/{uid} profile
+│   ├── auth_repository.dart      # abstract auth + AuthUser (email/name/uid) + UsernameTakenException, normalizeUsername
+│   ├── firebase_auth_repository.dart # Email+Password auth + users/{uid} profile + usernames/{name} uniqueness index
 │   ├── group_repository.dart     # abstract repository (streams + mutations + aggregates)
 │   ├── firestore_repository.dart # Firestore implementation (batched writes, arrayUnion, memberships, count/sum)
 │   └── local_session.dart        # shared_preferences: display name, open group, managing-as
 ├── store/app_store.dart          # subscribes to repo streams, notifyListeners (per group)
+├── theme/app_theme.dart          # Material 3 theme (forest green + gold money accents, Manrope/Fraunces)
+├── widgets/
+│   ├── premium_card.dart         # shared card surface (hairline border, soft shadow)
+│   └── group_avatar.dart         # deterministic gradient monogram for a group
 └── screens/
-    ├── login_screen.dart         # email+password login / create account (toggle)
+    ├── login_screen.dart         # email+password login / create account (toggle, name = username)
     ├── home_page.dart            # My groups list + empty create/join + floating + + logout
     ├── profile_screen.dart       # account info + per-group stats (aggregate queries) + logout
-    ├── group_detail_screen.dart  # one group: Splits+Chat tabs, back + leave group
+    ├── group_detail_screen.dart  # one group: back, Splits + Chat (NavigationBar/IndexedStack), leave group
     ├── group_screen.dart         # JoinSetupScreen: pick "Managing as" member
     ├── splits_screen.dart        # expenses, splits, history, people, balances, settlements
     └── chat_screen.dart          # chat bubbles ("mine" = own managing name)
 test/
 ├── fake_group_repository.dart    # in-memory repository for tests
-└── splits_test.dart              # pure-logic + AppStore + membership + aggregate tests (32 tests)
+├── splits_test.dart              # pure-logic + AppStore + membership + aggregate tests (33 tests)
+└── username_test.dart            # normalizeUsername + UsernameTakenException (5 tests)
 ```
 
 ## Firestore layout
 
 - `users/{uid}` → `{displayName, email, createdAt}` — the account (uid from Firebase Auth).
+- `usernames/{normalizedName}` → `{uid}` — the global unique-username index (id = the normalized name, so create-if-absent is the atomic `UNIQUE` constraint).
 - `users/{uid}/groups/{groupId}` → `{name, joinedAt}` — a membership; Home lists these live.
 - `groups/{groupId}` → `{name, members: [names], createdAt}` — `groupId` is the group code.
 - `groups/{groupId}/expenses/{id}` → `{title, amountPaise, split, paidBy, sharesPaise, date: Timestamp, addedBy, changes: [{by, change, at: Timestamp}]}`.
@@ -95,7 +101,9 @@ Relationships: **USER `1‥N` GROUP** through the *membership* subcollection;
 **GROUP `1‥N` EXPENSE / ACTIVITY / MESSAGE**. In the NoSQL model an ER
 "members of a group" is the denormalized `members[]` array inside the group
 document (easy reads / "watch member names"), while the *membership
-documents* answer "whose groups is this user in". Money is **integer paise**
+documents* answer "whose groups is this user in". **USER** is also keyed by a
+global `USERNAME` index (`usernames/{normalizedName}` → `{uid}`), the NoSQL
+stand-in for a `UNIQUE` constraint on usernames. Money is **integer paise**
 end-to-end to avoid float drift; the edit `changes[]` map is the audit trail.
 
 ## Architecture notes
@@ -118,7 +126,7 @@ end-to-end to avoid float drift; the edit `changes[]` map is the audit trail.
   - *E-mail* is unique natively — Firebase Auth enforces it (`email-already-in-use` is surfaced in the UI).
   - *Username* is unique via `usernames/{name}` — an index keyed by the normalized (trimmed, whitespace-collapsed, lower-cased) name storing the owning `uid`. The security rules only allow **create** (a second write to the same id is an *update*, which is denied), so the create-if-absent write is the atomic `UNIQUE` index; a taken name surfaces as `UsernameTakenException` and the half-created auth account is deleted. Renaming (`updateProfile`) frees the old key and claims the new one in one batch.
   - *Group / message / activity ids* are Firestore auto-IDs (collision-proof); *expense ids* are `timestamp-<random>` so two phones saving in the same microsecond can't overwrite each other.
-  - *Referential integrity in rules*: every write under `groups/{groupId}` requires the caller to hold `users/{uid}/groups/{groupId}` **before or after the same batch** (`exists(...) || getAfter(...).exists()`), which keeps the atomic `createGroup`/`joinGroup`/`leaveGroup` batches valid while blocking outside writes. Group *reads* stay open so a code-only user can preview a group before joining.
+  - *Referential integrity in rules*: every write under `groups/{groupId}` requires the caller to hold `users/{uid}/groups/{groupId}` **before or after the same batch** (`exists(...) || getAfter(...).exists()`), which keeps the atomic `createGroup`/`joinGroup`/`leaveGroup` batches valid while blocking outside writes. Group *reads* are allowed for **any signed-in user** (not only members), so a code-only user can preview a group before joining.
   - Members within a group are unique case-insensitively (`"John"` and `"john"` are the same person).
   - *Known limitation*: attribution (expenses' `paidBy`, chat sender, group members) is by display name string, so renaming an account re-labels only future entries.
 - **Design system** (`lib/theme/app_theme.dart`): a single Material 3 theme drives the premium look — deep-forest green primary with a muted gold reserved for rupee figures (serif italic Fraunces) against a cool mist background with Manrope type. The debug banner is disabled (`debugShowCheckedModeBanner: false`).
@@ -131,4 +139,6 @@ end-to-end to avoid float drift; the edit `changes[]` map is the audit trail.
 
 ## Testing
 
-Pure-logic groups (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` groups (stream load, add/replace/remove expense with stamped history + activity, removeMember batch, chat senderName/ordering), membership tests (`myGroups`, `joinGroup` dedupe, `leaveGroup` strips shares, unknown-code throws) and aggregate-query tests (`expenseCount`, `expenseCountBetween`, `totalTrackedPaise`, `perMemberPaid`) plus `normalizeUsername`/`UsernameTakenException` and case-insensitive member dedupe. `flutter analyze` clean, `flutter test` 38/38...
+Two test files: `test/splits_test.dart` (33 tests) covers pure logic (`Expense.equalSplit`, `computeBalances`, `computeSettlements`, `diffExpenses`, `stripMemberFromShares`, money helpers) plus `AppStore`-against-`InMemoryGroupRepository` behaviour (stream load, add/replace/remove expense with stamped history + activity, `removeMember` batch, chat senderName/ordering), membership (`myGroups`, `joinGroup` dedupe, `leaveGroup` strips shares, unknown-code throws, case-insensitive member dedupe) and aggregate queries (`expenseCount`, `expenseCountBetween`, `totalTrackedPaise`, `perMemberPaid`); `test/username_test.dart` (5 tests) covers `normalizeUsername` and `UsernameTakenException`.
+
+Current status: `flutter analyze` clean, `flutter test` 38/38 pass.
